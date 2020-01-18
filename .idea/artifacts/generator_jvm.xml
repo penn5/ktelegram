@@ -1,0 +1,8 @@
+<component name="ArtifactManager">
+  <artifact type="jar" name="generator-jvm">
+    <output-path>$PROJECT_DIR$/generator/build/libs</output-path>
+    <root id="archive" name="generator-jvm.jar">
+      <element id="module-output" name="ktelegram.generator.jvmMain" />
+    </root>
+  </artifact>
+</component>
