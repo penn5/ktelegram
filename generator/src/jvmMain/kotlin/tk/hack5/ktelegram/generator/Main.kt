@@ -33,6 +33,8 @@ fun parseAndSave(inputFile: File, outputDir: String, packageName: String) {
     for (constructor in data.constructors) {
         println("=====")
         writer = NormalKtWriter({ bufferedWriter!!.write(it) }, constructor, packageName)
+        if (" " in writer.tlName || "<" in writer.tlName)
+            continue
         file = File("$outputDir/${writer.tlName.capitalize()}Object.kt")
         file.parentFile.mkdirs()
         bufferedWriter = file.bufferedWriter()
@@ -42,6 +44,8 @@ fun parseAndSave(inputFile: File, outputDir: String, packageName: String) {
     for (method in data.methods) {
         writer = NormalKtWriter({ bufferedWriter!!.write(it) }, method, packageName)
         file = File("$outputDir/${writer.tlName.capitalize()}Request.kt")
+        if (" " in writer.tlName || "<" in writer.tlName)
+            continue
         file.parentFile.mkdirs()
         bufferedWriter = file.bufferedWriter()
         writer.build()
@@ -50,6 +54,8 @@ fun parseAndSave(inputFile: File, outputDir: String, packageName: String) {
     for (type in data.types) {
         writer = TypeKtWriter({ bufferedWriter!!.write(it) }, type, packageName)
         file = File("$outputDir/${writer.tlName.capitalize()}Type.kt")
+        if (" " in writer.tlName || "<" in writer.tlName)
+            continue
         file.parentFile.mkdirs()
         bufferedWriter = file.bufferedWriter()
         writer.build()
@@ -64,5 +70,5 @@ fun parseAndSave(inputFile: File, outputDir: String, packageName: String) {
 @ExperimentalUnsignedTypes
 fun main() {
     parseAndSave(File("resources/schema.json"), "../core/generated/commonMain/kotlin/tk/hack5/ktelegram/core/tl", "tk.hack5.ktelegram.core.tl")
-    parseAndSave(File("resources/schema-mtproto.json"), "../core/generator/commonMain/kotlin/tk/hack5/ktelegram/core/mtproto", "tk.hack5.ktelegram.core.mtproto")
+    parseAndSave(File("resources/schema-mtproto.json"), "../core/generated/commonMain/kotlin/tk/hack5/ktelegram/core/mtproto", "tk.hack5.ktelegram.core.mtproto")
 }
