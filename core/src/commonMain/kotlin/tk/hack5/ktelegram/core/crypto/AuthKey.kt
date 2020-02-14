@@ -30,6 +30,7 @@ data class AuthKey(private val data: BigInteger) {
     val keyId: Long
 
     init {
+        println("key.size=${key.size}")
         val hash = key.sha1()
         println(hash)
         auxHash = LongObject.fromTlRepr(hash.toIntArray())!!.second.native // 64 high order bits

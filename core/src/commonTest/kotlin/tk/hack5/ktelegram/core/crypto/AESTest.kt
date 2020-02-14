@@ -29,7 +29,7 @@ class AESTests {
         val iv = byteArrayOf(32, -72, -117, -11, -97, 33, -127, 108, 15, -84, 93, -31, -49, 32, 40, -38, -47, 72, 22, 29, -84, 19, 104, 68, 91, -21, 22, -25, 5, -31, -20, 105)
 
         val data = Random.Default.nextBytes(26)
-        val encrypted = AESPlatformImpl(AESMode.ENCRYPT, key).doIGE(iv, data, Random)
+        val encrypted = AESPlatformImpl(AESMode.ENCRYPT, key).doIGE(iv, data) { Random.nextBytes(it) }
         val decrypted = AESPlatformImpl(AESMode.DECRYPT, key).doIGE(iv, encrypted).slice(0 until 26)
         assertEquals(data.toList(), decrypted)
     }

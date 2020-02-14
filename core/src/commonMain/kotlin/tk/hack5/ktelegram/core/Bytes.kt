@@ -48,7 +48,7 @@ class BytesObject(val bytes: ByteArray, override val bare: Boolean) : TLObject<B
                 off = 4
                 byteArrayOf(arr[1], arr[2], arr[3]).toInt()
             }
-            return Pair(off + (len + 3) / 4, BytesObject(arr.slice(off until off + len).toByteArray(), true))
+            return Pair((off + len + 3) / 4, BytesObject(arr.sliceArray(off until off + len), true))
         }
 
         @ExperimentalUnsignedTypes

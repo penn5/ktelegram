@@ -89,7 +89,7 @@ fun BigInteger.toByteArray(size: Int): ByteArray {
         return ret
     if (ret.size == size + 1) {
         require(ret[0] == 0.toByte())
-        return ret.take(1).toByteArray()
+        return ret.drop(1).toByteArray()
     }
     require(ret.size < size) { "Size $size is larger than ${ret.size} ($this=${ret.contentToString()})" }
     return ByteArray(size - ret.size) { 0 } + ret

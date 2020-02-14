@@ -19,7 +19,7 @@
 package tk.hack5.ktelegram.core.crypto
 
 import kotlin.experimental.xor
-import kotlin.random.Random
+import kotlin.math.min
 
 interface AESInterface {
     val mode: AESMode
@@ -27,7 +27,7 @@ interface AESInterface {
 
     fun doECB(data: ByteArray): ByteArray
 
-    fun doIGE(iv: ByteArray, input: ByteArray, secureRandom: Random? = null): ByteArray
+    fun doIGE(iv: ByteArray, input: ByteArray, secureRandom: ((Int) -> ByteArray)? = null): ByteArray
 
     val blockSize: Int
 }
@@ -39,12 +39,12 @@ abstract class AES(override val mode: AESMode, override val key: ByteArray): AES
  * Platforms that don't want to use this less efficient implementation should override [doIGE]
  */
 abstract class AESBaseImpl(mode: AESMode, key: ByteArray) : AES(mode, key) {
-    override fun doIGE(iv: ByteArray, input: ByteArray, secureRandom: Random?): ByteArray {
+    override fun doIGE(iv: ByteArray, input: ByteArray, secureRandom: ((Int) -> ByteArray)?): ByteArray {
         // https://github.com/LonamiWebs/Telethon/blob/7b4cd92/telethon/crypto/aes.py
 
         val data = if (mode == AESMode.ENCRYPT) {
             val padding = input.size % blockSize
-            if (padding == 0) input else input + secureRandom!!.nextBytes(blockSize - padding)
+            if (padding == 0) input else input + secureRandom!!(blockSize - padding)
         } else input
 
         val ivSplit = Pair(iv.sliceArray(0 until iv.size / 2), iv.sliceArray(iv.size / 2 until iv.size))
@@ -66,13 +66,17 @@ abstract class AESBaseImpl(mode: AESMode, key: ByteArray) : AES(mode, key) {
         var outputBlock: ByteArray
 
         return (data.indices step blockSize).map { block ->
-            inputBlock.indices.forEach { index -> inputBlock[index] = data[block + index].xor(iv2[index]) }
+            inputBlock.indices.forEach { index ->
+                if (block + index >= data.size)
+                    return@forEach
+                inputBlock[index] = data[block + index].xor(iv2[index])
+            }
 
             outputBlock = doECB(inputBlock)
 
             outputBlock = outputBlock.mapIndexed { index, byte -> byte.xor(iv1[index]) }.toByteArray()
 
-            iv1 = data.sliceArray(block until block + blockSize)
+            iv1 = data.sliceArray(block until min(block + blockSize, data.size))
             iv2 = outputBlock
 
             outputBlock.toList()

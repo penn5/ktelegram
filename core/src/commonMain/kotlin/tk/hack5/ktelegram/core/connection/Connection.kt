@@ -146,6 +146,7 @@ class TcpFullConnection(host: String, port: Int, network: (String, Int) -> TCPCl
         val calculatedCrc = calculateCRC32(full)
         if (crc != calculatedCrc)
             error("Invalid CRC in recv! $crc != $calculatedCrc")
+        println(ret.contentToString())
         return ret // We don't care that there is extra data (the CRC) at the end, the fromTlRepr will ignore it.
     }
 }
