@@ -25,7 +25,7 @@ import tk.hack5.ktelegram.core.toIntArray
 import tk.hack5.ktelegram.core.utils.pad
 
 data class AuthKey(private val data: BigInteger) {
-    private val key = data.toByteArray().pad(256)
+    val key = data.toByteArray().pad(256)
     val auxHash: Long
     val keyId: Long
 

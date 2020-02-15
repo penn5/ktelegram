@@ -29,7 +29,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
-class AuthenticatorKtTest {
+class AuthenticatorTest {
     var randomIndex = 0
 
     @Test

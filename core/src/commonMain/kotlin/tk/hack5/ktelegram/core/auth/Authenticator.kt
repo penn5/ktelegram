@@ -63,8 +63,6 @@ internal fun step4(
             break
         }
     }
-    println(encryptedData?.contentToString())
-    println(encryptedData?.size)
     encryptedData ?: error("No server fingerprints are trusted")
 
     return ReqDHParamsRequest(
@@ -79,7 +77,7 @@ internal fun step5(
     newNonce: BigInteger,
     serverNonce: BigInteger
 ):
-        Pair<Triple<BigInteger, BigInteger, BigInteger>, Pair<ByteArray, ByteArray>> {
+        Triple<Triple<BigInteger, BigInteger, BigInteger>, Pair<ByteArray, ByteArray>, Int> {
     when (serverOuterDHParams) {
         is ServerDHParamsOkObject -> Napier.d("Got DH params OK", tag = tag)
         is ServerDHParamsFailObject -> {
@@ -97,31 +95,21 @@ internal fun step5(
 
     require(serverOuterDHParams.nonce == nonce) { "Invalid nonce" }
     require(serverOuterDHParams.serverNonce == serverNonce) { "Invalid server nonce" }
-    println("serverNonce=$serverNonce,newNonce=$newNonce")
     val key = generateKeyFromNonce(serverNonce, newNonce)
     Napier.d("key=${key.first.contentToString()}, iv=${key.second.contentToString()}", tag = tag)
     val decryptedAnswer =
         AESPlatformImpl(AESMode.DECRYPT, key.first).doIGE(key.second, serverOuterDHParams.encryptedAnswer)
-    println(decryptedAnswer.contentToString())
     val answer = ServerDHInnerDataObject.fromTlRepr(
         decryptedAnswer
             .sliceArray(20 until decryptedAnswer.size).toIntArray()
     )
     val checksum = decryptedAnswer.sliceArray(20 until answer!!.first * Int.SIZE_BYTES + 20).sha1()
-    println(serverOuterDHParams.encryptedAnswer.contentToString())
-    println(decryptedAnswer.contentToString())
-    println("checksum")
-    println(checksum.contentToString())
-    println(decryptedAnswer.sliceArray(0 until 20).contentToString())
-    println(answer.first)
     require(checksum.contentEquals(decryptedAnswer.sliceArray(0 until 20))) { "Corrupt DH params" }
 
     val serverDHParams = answer.second
     Napier.d("serverDHParams=$serverDHParams", tag = tag)
     require(serverDHParams.nonce == nonce) { "Invalid nonce" }
     require(serverDHParams.serverNonce == serverNonce) { "Invalid server nonce" }
-    // FIXME
-    // plaintextEncoder.state.updateTimeOffset(serverDHParams.serverTime)
 
     // Maths-y stuff https://github.com/LonamiWebs/Telethon/blob/cd4b915522a7b3d1bd9f392228812a531b58ff7e/telethon/network/authenticator.py#L120
     val dhPrime = BigInteger(byteArrayOf(0) + serverDHParams.dhPrime)
@@ -141,16 +129,14 @@ internal fun step5(
         }
     ) { "Server sent invalid dhPrime or g" }
 
-    println(serverDHParams.gA.contentToString())
+
     val ga = BigInteger(byteArrayOf(0) + serverDHParams.gA)
     val g = BigInteger.of(serverDHParams.g)
 
     val dhPrimeMinusOne = dhPrime - BigInteger.ONE
     require(g > BigInteger.ONE && g < dhPrimeMinusOne) { "Server sent invalid g" }
     require(ga > BigInteger.ONE && ga < dhPrimeMinusOne) { "Server sent invalid ga" }
-    println("g=$g, ga=$ga")
-    println("dh_prime=$dhPrime")
-    return Pair(Triple(g, ga, dhPrime), key)
+    return Triple(Triple(g, ga, dhPrime), key, serverDHParams.serverTime)
 }
 
 internal fun step6(
@@ -164,13 +150,10 @@ internal fun step6(
     retryId: Long = 0
 ): Pair<SetClientDHParamsRequest, AuthKey> {
     val b = BigInteger(byteArrayOf(0) + random(256)) // Unsigned
-    println("b=$b")
     val gb = g.modPow(b, dhPrime)!!
     if (gb <= BigInteger.ONE || gb >= dhPrime - BigInteger.ONE) error("Invalid gb")
     val gab = ga.modPow(b, dhPrime)!!
     val authKey = AuthKey(gab)
-    println(gb.toByteArray())
-    println(gb.toByteArray(256))
     val clientDHParams = ClientDHInnerDataObject(nonce, serverNonce, retryId, gb.toByteArray(256))
     Napier.d("clientDHParams=$clientDHParams")
     val clientDHParamsRepr = clientDHParams.toTlRepr().toByteArray()
@@ -210,6 +193,7 @@ internal suspend fun authenticate(client: TelegramClient, plaintextEncoder: MTPr
     val serverOuterDHParams = client.send(step4(newNonce, factors, pqRes) { Random.nextBytes(it) }, plaintextEncoder)
     Napier.d("serverDhParams=$serverOuterDHParams", tag = tag)
     val secrets = step5(serverOuterDHParams, nonce, newNonce, pqRes.serverNonce)
+    plaintextEncoder.state.updateTimeOffset(secrets.third)
     var retryId = 0L
     while (true) {
         val step6ret = step6(
@@ -232,18 +216,9 @@ internal suspend fun authenticate(client: TelegramClient, plaintextEncoder: MTPr
 }
 
 internal fun validateNewNonceHash(newNonceHash: BigInteger, i: Int, newNonce: BigInteger, authKey: AuthKey) {
-    println(authKey)
-    println(newNonce)
-    println(authKey.auxHash)
     val data =
         newNonce.asTlObject256().toTlRepr().toByteArray() + i.toByte() + authKey.auxHash.asTlObject().toTlRepr().toByteArray()
-    println(newNonce.toByteArray(32).contentToString())
-    println(data.contentToString())
     val hash = data.sha1()
-    println("hashes")
-    println(hash.contentToString())
-    println(newNonceHash)
-    println(newNonceHash.toByteArray().contentToString())
     require(hash.sliceArray(4 until 20).reversedArray().contentEquals(newNonceHash.toByteArray())) { "Invalid new nonce hash" }
 }
 
