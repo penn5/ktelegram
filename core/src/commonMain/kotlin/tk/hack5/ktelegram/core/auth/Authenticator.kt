@@ -21,11 +21,11 @@ package tk.hack5.ktelegram.core.auth
 import com.github.aakira.napier.Napier
 import com.soywiz.krypto.sha1
 import org.gciatto.kt.math.BigInteger
-import tk.hack5.ktelegram.core.*
 import tk.hack5.ktelegram.core.client.TelegramClient
 import tk.hack5.ktelegram.core.crypto.*
 import tk.hack5.ktelegram.core.encoder.MTProtoEncoder
 import tk.hack5.ktelegram.core.mtproto.*
+import tk.hack5.ktelegram.core.tl.*
 import kotlin.random.Random
 
 private const val tag = "Authenticator"

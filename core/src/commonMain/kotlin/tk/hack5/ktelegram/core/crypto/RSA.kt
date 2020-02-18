@@ -22,11 +22,10 @@ package tk.hack5.ktelegram.core.crypto
 
 import com.soywiz.krypto.sha1
 import org.gciatto.kt.math.BigInteger
-import tk.hack5.ktelegram.core.LongObject
-import tk.hack5.ktelegram.core.asTlObject
-import tk.hack5.ktelegram.core.toByteArray
-import tk.hack5.ktelegram.core.toIntArray
-import tk.hack5.ktelegram.core.utils.fromBase64
+import tk.hack5.ktelegram.core.tl.LongObject
+import tk.hack5.ktelegram.core.tl.asTlObject
+import tk.hack5.ktelegram.core.tl.toByteArray
+import tk.hack5.ktelegram.core.tl.toIntArray
 import kotlin.jvm.JvmName
 
 const val beginKeyMagic = "-----BEGIN RSA PUBLIC KEY-----"
@@ -80,7 +79,7 @@ open class RSAEncoderImpl : RSAEncoder {
     }
 
     override fun decrypt(data: ByteArray, fingerprint: Long): ByteArray? {
-        TODO()
+        TODO("AFAIK this is never used")
     }
 
     companion object : RSAEncoderImpl() {

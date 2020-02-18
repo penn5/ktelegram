@@ -16,11 +16,12 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-package tk.hack5.ktelegram.core
+package tk.hack5.ktelegram.core.tl
 
 fun String.asTlObject() = StringObject(this, true)
 
-class StringObject(private val string: String, override val bare: Boolean) : TLObject<String> {
+class StringObject(private val string: String, override val bare: Boolean) :
+    TLObject<String> {
     @ExperimentalUnsignedTypes
     override fun _toTlRepr() = string.toByteArray().asTlObject().toTlRepr()
 
@@ -29,7 +30,8 @@ class StringObject(private val string: String, override val bare: Boolean) : TLO
     @ExperimentalUnsignedTypes
     override val _id = Companion._id
 
-    companion object : TLConstructor<StringObject> {
+    companion object :
+        TLConstructor<StringObject> {
         @ExperimentalUnsignedTypes
         override fun _fromTlRepr(data: IntArray): Pair<Int, StringObject>? = BytesObject.fromTlRepr(data)?.let {
             Pair(it.first, it.second.native.asString().asTlObject())

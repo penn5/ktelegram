@@ -16,30 +16,32 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-package tk.hack5.ktelegram.core
+package tk.hack5.ktelegram.core.tl
 
-import org.gciatto.kt.math.BigInteger
+fun Int.asTlObject() = IntObject(this, true)
 
-internal fun ByteArray.toIntArray(): IntArray {
-    if (size % Int.SIZE_BYTES != 0)
-        error("Bytes must be padded")
-    return (0 until size / Int.SIZE_BYTES).map { sliceArray(it * Int.SIZE_BYTES until (it + 1) * Int.SIZE_BYTES) }
-        .map { it.toInt() }.toIntArray()
-}
-
-internal fun IntArray.toByteArray(): ByteArray {
-    return map { it.toByteArray().toList() }.flatten().toByteArray()
-}
-
-internal fun ByteArray.toInt(): Int {
-    var ret = 0
-    for (i in indices) {
-        ret += this[i].toInt().and(0xFF).shl(i * Byte.SIZE_BITS)
+class IntObject(private val int: Int, override val bare: Boolean) :
+    TLObject<Int> {
+    @ExperimentalUnsignedTypes
+    override fun _toTlRepr(): IntArray {
+        return intArrayOf(int)
     }
-    return ret
-}
 
-internal fun Int.toByteArray(size: Int = Int.SIZE_BYTES): ByteArray {
-    return (0 until size).map { ushr((it) * Byte.SIZE_BITS)
-        .and(0xFF).toByte() }.toByteArray()
+    override val native = int
+
+    @ExperimentalUnsignedTypes
+    override val _id = Companion._id
+
+    companion object :
+        TLConstructor<IntObject> {
+        @ExperimentalUnsignedTypes
+        override fun _fromTlRepr(data: IntArray): Pair<Int, IntObject>? {
+            return data.firstOrNull()?.let {
+                Pair(1, IntObject(it, true))
+            }
+        }
+
+        @ExperimentalUnsignedTypes
+        override val _id: UInt? = null
+    }
 }

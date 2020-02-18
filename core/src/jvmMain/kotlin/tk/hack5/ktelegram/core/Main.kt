@@ -18,26 +18,27 @@
 
 package tk.hack5.ktelegram.core
 
-import com.github.aakira.napier.Antilog
 import com.github.aakira.napier.DebugAntilog
 import com.github.aakira.napier.Napier
-import com.soywiz.klock.DateTime
+import kotlinx.coroutines.debug.DebugProbes
 import kotlinx.coroutines.runBlocking
 import tk.hack5.ktelegram.core.client.TelegramClientImpl
-import tk.hack5.ktelegram.core.connection.Connection
-import tk.hack5.ktelegram.core.connection.TcpFullConnection
-import tk.hack5.ktelegram.core.network.TCPClientImpl
 import tk.hack5.ktelegram.core.tl.InputPeerEmptyObject
 import tk.hack5.ktelegram.core.tl.Messages_GetDialogsRequest
 
 fun main() {
+    DebugProbes.install()
     Napier.base(DebugAntilog())
     println(Messages_GetDialogsRequest(false, null, 0, 0, InputPeerEmptyObject(), 100, 0).toTlRepr().map { it.toUInt() }.joinToString())
     amain()
 }
 
 fun amain() = runBlocking {
-    val client = TelegramClientImpl("", "")
+    val client = TelegramClientImpl("596386", "e142e0a65a50b707fa539ac91db2de16")
+    /*thread(start=true) {
+        sleep(7500)
+//        DebugProbes.dumpCoroutines()
+        DebugProbes.dumpCoroutines()
+    }*/
     client.connect()
-
 }

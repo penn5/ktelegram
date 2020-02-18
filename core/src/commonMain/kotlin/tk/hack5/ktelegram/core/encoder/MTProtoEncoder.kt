@@ -18,9 +18,18 @@
 
 package tk.hack5.ktelegram.core.encoder
 
+import tk.hack5.ktelegram.core.mtproto.MessageObject
 import tk.hack5.ktelegram.core.state.MTProtoState
+import tk.hack5.ktelegram.core.tl.TLObject
 
 abstract class MTProtoEncoder(val state: MTProtoState) {
     abstract fun encode(data: ByteArray): ByteArray
     abstract fun decode(data: ByteArray): ByteArray
+}
+
+abstract class MTProtoEncoderWrapped(state: MTProtoState) : MTProtoEncoder(state) {
+    abstract fun encodeMessage(data: MessageObject): ByteArray
+    abstract fun decodeMessage(data: ByteArray): MessageObject
+
+    abstract fun wrapAndEncode(data: TLObject<*>, isContentRelated: Boolean = true): ByteArray
 }

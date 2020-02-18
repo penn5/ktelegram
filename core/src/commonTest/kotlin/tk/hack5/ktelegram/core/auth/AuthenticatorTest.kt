@@ -23,8 +23,7 @@ import tk.hack5.ktelegram.core.crypto.AuthKey
 import tk.hack5.ktelegram.core.mtproto.DhGenOkObject
 import tk.hack5.ktelegram.core.mtproto.ResPQObject
 import tk.hack5.ktelegram.core.mtproto.ServerDHParamsOkObject
-import tk.hack5.ktelegram.core.toByteArray
-import tk.hack5.ktelegram.core.toIntArray
+import tk.hack5.ktelegram.core.tl.toIntArray
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull

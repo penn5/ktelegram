@@ -16,11 +16,12 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-package tk.hack5.ktelegram.core
+package tk.hack5.ktelegram.core.tl
 
 fun ByteArray.asTlObject() = BytesObject(this, true)
 
-class BytesObject(val bytes: ByteArray, override val bare: Boolean) : TLObject<ByteArray> {
+class BytesObject(private val bytes: ByteArray, override val bare: Boolean) :
+    TLObject<ByteArray> {
     @ExperimentalUnsignedTypes
     override fun _toTlRepr(): IntArray {
         return if (bytes.size >= 254) {
@@ -36,7 +37,8 @@ class BytesObject(val bytes: ByteArray, override val bare: Boolean) : TLObject<B
     @ExperimentalUnsignedTypes
     override val _id = Companion._id
 
-    companion object : TLConstructor<BytesObject> {
+    companion object :
+        TLConstructor<BytesObject> {
         @ExperimentalUnsignedTypes
         override fun _fromTlRepr(data: IntArray): Pair<Int, BytesObject>? {
             val arr = data.toByteArray()
@@ -48,7 +50,10 @@ class BytesObject(val bytes: ByteArray, override val bare: Boolean) : TLObject<B
                 off = 4
                 byteArrayOf(arr[1], arr[2], arr[3]).toInt()
             }
-            return Pair((off + len + 3) / 4, BytesObject(arr.sliceArray(off until off + len), true))
+            return Pair(
+                (off + len + 3) / 4,
+                BytesObject(arr.sliceArray(off until off + len), true)
+            )
         }
 
         @ExperimentalUnsignedTypes

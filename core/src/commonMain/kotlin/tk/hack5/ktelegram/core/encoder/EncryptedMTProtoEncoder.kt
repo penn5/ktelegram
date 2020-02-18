@@ -19,27 +19,27 @@
 package tk.hack5.ktelegram.core.encoder
 
 import com.soywiz.krypto.sha256
-import tk.hack5.ktelegram.core.LongObject
-import tk.hack5.ktelegram.core.asTlObject
 import tk.hack5.ktelegram.core.crypto.AES
 import tk.hack5.ktelegram.core.crypto.AESMode
-import tk.hack5.ktelegram.core.crypto.AuthKey
+import tk.hack5.ktelegram.core.crypto.AESPlatformImpl
+import tk.hack5.ktelegram.core.mtproto.MessageObject
+import tk.hack5.ktelegram.core.mtproto.ObjectObject
 import tk.hack5.ktelegram.core.state.MTProtoState
-import tk.hack5.ktelegram.core.toByteArray
-import tk.hack5.ktelegram.core.toIntArray
+import tk.hack5.ktelegram.core.tl.TLObject
+import tk.hack5.ktelegram.core.tl.toByteArray
+import tk.hack5.ktelegram.core.tl.toIntArray
 import kotlin.random.Random
 
-class EncryptedMTProtoEncoder(
+open class EncryptedMTProtoEncoder(
     state: MTProtoState,
-    val authKey: AuthKey,
-    val aesConstructor: (AESMode, ByteArray) -> AES
-) : MTProtoEncoder(state) {
-    val authKeyId = authKey.keyId.asTlObject().toTlRepr().toByteArray()
+    val aesConstructor: (AESMode, ByteArray) -> AES = ::AESPlatformImpl
+) : MTProtoEncoderWrapped(state) {
+    private val authKeyId = state.authKey!!.keyId
 
     private fun calcKey(msgKey: ByteArray, client: Boolean): Pair<ByteArray, ByteArray> {
         val x = if (client) 0 else 8
-        val sha256a = (msgKey + authKey.key.sliceArray(x until x + 36)).sha256()
-        val sha256b = (authKey.key.sliceArray(x + 40 until x + 76) + msgKey).sha256()
+        val sha256a = (msgKey + state.authKey!!.key.sliceArray(x until x + 36)).sha256()
+        val sha256b = (state.authKey!!.key.sliceArray(x + 40 until x + 76) + msgKey).sha256()
 
         val key = sha256a.sliceArray(0 until 8) + sha256b.sliceArray(8 until 24) + sha256a.sliceArray(24 until 32)
         val iv = sha256b.sliceArray(0 until 8) + sha256a.sliceArray(8 until 24) + sha256b.sliceArray(24 until 32)
@@ -48,27 +48,42 @@ class EncryptedMTProtoEncoder(
 
     override fun encode(data: ByteArray): ByteArray {
         val internalHeader =
-            state.salt + state.sessionId + state.getMsgId().asTlObject().toTlRepr().toByteArray() + (state.seq++ * 2).asTlObject().toTlRepr().toByteArray()
+            state.salt + state.sessionId
         val paddingLength = (-internalHeader.size - data.size - 12) % 16 + 12
         val fullData = internalHeader + data + Random.nextBytes(paddingLength)
-        val msgKey = (authKey.key.sliceArray(88 until 120) + fullData).sha256().sliceArray(8 until 24)
+        val msgKey = (state.authKey!!.key.sliceArray(88 until 120) + fullData).sha256().sliceArray(8 until 24)
         val aesKey = calcKey(msgKey, true)
         val encrypted = aesConstructor(AESMode.ENCRYPT, aesKey.first).doIGE(aesKey.second, fullData)
         return authKeyId + msgKey + encrypted
     }
 
+    override fun encodeMessage(data: MessageObject): ByteArray = encode(data.toTlRepr().toByteArray())
+    override fun wrapAndEncode(data: TLObject<*>, isContentRelated: Boolean): ByteArray {
+        val seq = (if (isContentRelated) state.seq++ else state.seq) * 2 + if (isContentRelated) 1 else 0
+        val encoded = data.toTlRepr().toByteArray()
+        return encodeMessage(MessageObject(state.getMsgId(), seq, encoded.size, ObjectObject(data), bare = true))
+    }
+
     override fun decode(data: ByteArray): ByteArray {
         require(data.size >= 8) { "Data too small" }
-        require(data.sliceArray(0 until 8).contentEquals(authKeyId))
+        require(data.sliceArray(0 until 8).contentEquals(authKeyId)) { "Invalid authKeyId" }
         val msgKey = data.sliceArray(8 until 24)
         val aesKey = calcKey(msgKey, false)
         val decrypted =
             aesConstructor(AESMode.DECRYPT, aesKey.first).doIGE(aesKey.second, data.sliceArray(24 until data.size))
-        require((authKey.key.sliceArray(88 until 120) + decrypted).sha256().sliceArray(8 until 24).contentEquals(msgKey)) { "Invalid msgKey" }
-        require(decrypted.sliceArray(0 until 8).contentEquals(state.salt)) { "Invalid salt" }
+        println(decrypted.contentToString())
+        require(
+            (state.authKey!!.key.sliceArray(96 until 128) + decrypted).sha256().sliceArray(8 until 24).contentEquals(
+                msgKey
+            )
+        ) { "Invalid msgKey" }
+        require(decrypted.sliceArray(0 until 8).contentEquals(state.salt) || state.salt.all { it == 0.toByte() }) { "Invalid salt" }
         require(decrypted.sliceArray(8 until 16).contentEquals(state.sessionId)) { "Invalid sessionId" }
-        require(state.validateMsgId(LongObject.fromTlRepr(decrypted.sliceArray(16 until 24).toIntArray())!!.second.native)) { "Invalid msgId" }
-        require(decrypted.sliceArray(24 until 32)) // TODO
-
+        // We cannot validate the msgId yet if there's a container because the container contents will be lower
+        println(decrypted.slice(16 until decrypted.size))
+        return decrypted.sliceArray(16 until decrypted.size)
     }
+
+    override fun decodeMessage(data: ByteArray): MessageObject =
+        MessageObject.fromTlRepr(decode(data).toIntArray(), bare = true)!!.second
 }

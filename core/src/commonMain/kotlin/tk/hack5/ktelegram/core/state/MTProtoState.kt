@@ -22,8 +22,9 @@ import com.github.aakira.napier.Napier
 import com.soywiz.klock.DateTime
 import com.soywiz.klock.seconds
 import kotlinx.serialization.Serializable
-import tk.hack5.ktelegram.core.asTlObject
-import tk.hack5.ktelegram.core.toByteArray
+import tk.hack5.ktelegram.core.crypto.AuthKey
+import tk.hack5.ktelegram.core.tl.asTlObject
+import tk.hack5.ktelegram.core.tl.toByteArray
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 import kotlin.random.Random
@@ -31,7 +32,7 @@ import kotlin.random.Random
 private const val tag = "MTProtoState"
 
 interface MTProtoState {
-    var authKey: Long
+    val authKey: AuthKey?
     var timeOffset: Long
     var salt: ByteArray
     val sessionId: ByteArray
@@ -46,9 +47,9 @@ interface MTProtoState {
 }
 
 @Serializable
-class MTProtoStateImpl(override var authKey: Long = 0) : MTProtoState {
+class MTProtoStateImpl(override val authKey: AuthKey? = null) : MTProtoState {
     override var timeOffset = 0L
-    override var salt = 0.asTlObject().toTlRepr().toByteArray()
+    override var salt = 0L.asTlObject().toTlRepr().toByteArray()
     override val sessionId = Random.nextLong().asTlObject().toTlRepr().toByteArray()
     override var seq = 0
     override var lastMsgId = 0L

@@ -19,21 +19,24 @@
 package tk.hack5.ktelegram.core.crypto
 
 import com.soywiz.krypto.sha1
+import kotlinx.serialization.Serializable
 import org.gciatto.kt.math.BigInteger
-import tk.hack5.ktelegram.core.LongObject
-import tk.hack5.ktelegram.core.toIntArray
+import tk.hack5.ktelegram.core.tl.BigIntegerSerializer
+import tk.hack5.ktelegram.core.tl.LongObject
+import tk.hack5.ktelegram.core.tl.toIntArray
 import tk.hack5.ktelegram.core.utils.pad
 
+@Serializable(with = BigIntegerSerializer::class)
 data class AuthKey(private val data: BigInteger) {
     val key = data.toByteArray().pad(256)
     val auxHash: Long
-    val keyId: Long
+    val keyId: ByteArray
 
     init {
         println("key.size=${key.size}")
         val hash = key.sha1()
         println(hash)
         auxHash = LongObject.fromTlRepr(hash.toIntArray())!!.second.native // 64 high order bits
-        keyId = LongObject.fromTlRepr(hash.sliceArray(12 until 20).toIntArray())!!.second.native // 64 low order bits
+        keyId = hash.sliceArray(12 until 20) // 64 low order bits
     }
 }

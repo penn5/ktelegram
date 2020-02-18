@@ -19,17 +19,17 @@
 package tk.hack5.ktelegram.core.connection
 
 import com.github.aakira.napier.Napier
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ClosedReceiveChannelException
 import kotlinx.coroutines.channels.ReceiveChannel
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.io.readIntLittleEndian
 import kotlinx.coroutines.io.writeFully
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import tk.hack5.ktelegram.core.network.TCPClient
 import tk.hack5.ktelegram.core.network.TCPClientImpl
-import tk.hack5.ktelegram.core.toByteArray
+import tk.hack5.ktelegram.core.tl.toByteArray
 import tk.hack5.ktelegram.core.utils.calculateCRC32
 
 private const val tag = "Connection"
@@ -42,25 +42,26 @@ abstract class Connection(protected val host: String, protected val port: Int) {
         private set
     private val connectedChannel = Channel<Boolean?>()
     val connectedChangeChannel = connectedChannel as ReceiveChannel<Boolean?>
-    private var sendLock = Mutex()
-    private var recvLock = Mutex()
+    private val sendLock = Mutex()
+    private val recvLock = Mutex()
+    private var recvLoopTask: Job? = null
 
     private fun notifyConnectionStatus(status: Boolean?) {
-        Napier.i("New connection state for $this: $status", tag=tag)
+        Napier.i("New connection state for $this: $status", tag = tag)
         connected = status
         connectedChannel.offer(status)
     }
 
-    suspend fun connect() = coroutineScope {
+    suspend fun connect() {
         if (connected != false)
             throw AlreadyConnectedError("Still connected to the sever. Please wait for `connected == false`")
         notifyConnectionStatus(null)
         connectInternal()
         notifyConnectionStatus(true)
-        Unit
     }
 
     suspend fun disconnect() {
+        connected = null
         disconnectInternal()
         connected = false
         connectedChannel.offer(false)
@@ -69,6 +70,18 @@ abstract class Connection(protected val host: String, protected val port: Int) {
     suspend fun send(data: ByteArray) {
         sendLock.withLock {
             sendInternal(data)
+        }
+    }
+
+    suspend fun recvLoop(output: Channel<ByteArray>) {
+        recvLock.withLock {
+            while (connected == true) {
+                println("connected")
+                val a = recvInternal()
+                output.send(a)
+//               output.send(recvInternal())
+                println("connected2")
+            }
         }
     }
 
@@ -105,6 +118,7 @@ class TcpFullConnection(host: String, port: Int, network: (String, Int) -> TCPCl
     constructor(host: String, port: Int) : this(host, port, ::TCPClientImpl)
     private var counter = 0
     override suspend fun sendInternal(data: ByteArray) {
+        println("DATA IS ${data.toUByteArray().contentToString()}")
         val len = data.size + 12
         val ret = byteArrayOf(*len.toByteArray(), *counter++.toByteArray(), *data)
         val crc = calculateCRC32(ret)

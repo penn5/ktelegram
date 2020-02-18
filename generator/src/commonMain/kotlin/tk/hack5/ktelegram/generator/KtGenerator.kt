@@ -54,12 +54,13 @@ sealed class KtWriter(private val output: (String) -> Unit, private val packageN
 class MapKtWriter(output: (String) -> Unit, private val data: TLData, packageName: String) : KtWriter(output, packageName) {
     override fun build() {
         writeHeader()
-        write("import tk.hack5.ktelegram.core.TLConstructor")
-        write("import tk.hack5.ktelegram.core.TLObject")
+        write("import tk.hack5.ktelegram.core.tl.TLConstructor")
+        write("import tk.hack5.ktelegram.core.tl.TLObject")
         write()
         write("object TlMappings {", 1)
-        write("val OBJECTS = mapOf(" + data.constructors.joinToString {"0x${it.id.toString(16)}L.toInt() to " +
-                "${fixNamespace(it.name).substringBeforeLast(" ").capitalize()}Object"
+        write("val OBJECTS = mapOf(" + data.constructors.joinToString {
+            "0x${it.id.toString(16)}L.toInt() to " +
+                    "${fixNamespace(it.name).substringBeforeLast(" ").capitalize()}Object"
         } + ")")
         // Vectors need special serialization due to the generics, so exclude
         // them from here (they don't implement TLConstructor anyway)
@@ -98,7 +99,7 @@ class NormalKtWriter(output: (String) -> Unit, private val entry: TLEntry, packa
     private fun buildVector() {
         writeHeader()
         write("import org.gciatto.kt.math.BigInteger")
-        write("import tk.hack5.ktelegram.core.*")
+        write("import tk.hack5.ktelegram.core.tl.*")
         write("import kotlin.jvm.JvmName")
         write()
         write("@JvmName(\"GenericCollectionAsTlObject\")")
@@ -195,42 +196,45 @@ class NormalKtWriter(output: (String) -> Unit, private val entry: TLEntry, packa
     private fun writeImports() {
         when (entry.entryType) {
             EntryType.CONSTRUCTOR -> {
-                write("import tk.hack5.ktelegram.core.TLConstructor")
+                write("import tk.hack5.ktelegram.core.tl.TLConstructor")
                 entry.params.asSequence().map { it.type.toLowerCase().split("?", "<", ">") }
-                    .flatten().distinct().map { when (it) {
-                        "int" -> listOf("import tk.hack5.ktelegram.core.IntObject")
-                        "long" -> listOf("import tk.hack5.ktelegram.core.LongObject")
-                        "double" -> listOf("import tk.hack5.ktelegram.core.DoubleObject")
-                        "string" -> listOf("import tk.hack5.ktelegram.core.StringObject")
-                        "bytes" -> listOf("import tk.hack5.ktelegram.core.BytesObject")
-                        "int128", "int256" -> {
-                            println(tlName)
-                            listOf(
-                                "import tk.hack5.ktelegram.core.asTlObject${it.takeLast(3)}",
-                                "import org.gciatto.kt.math.BigInteger",
-                                "import tk.hack5.ktelegram.core.Int${it.takeLast(3)}Object"
-                            )
+                    .flatten().distinct().map {
+                        when (it) {
+                            "int" -> listOf("import tk.hack5.ktelegram.core.tl.IntObject")
+                            "long" -> listOf("import tk.hack5.ktelegram.core.tl.LongObject")
+                            "double" -> listOf("import tk.hack5.ktelegram.core.tl.DoubleObject")
+                            "string" -> listOf("import tk.hack5.ktelegram.core.tl.StringObject")
+                            "bytes" -> listOf("import tk.hack5.ktelegram.core.tl.BytesObject")
+                            "int128", "int256" -> {
+                                println(tlName)
+                                listOf(
+                                    "import tk.hack5.ktelegram.core.tl.asTlObject${it.takeLast(3)}",
+                                    "import org.gciatto.kt.math.BigInteger",
+                                    "import tk.hack5.ktelegram.core.tl.Int${it.takeLast(3)}Object"
+                                )
+                            }
+                            else -> null
                         }
-                        else -> null
-                    } }.filterNotNull().flatten().distinct().forEach { write(it) }
+                    }.filterNotNull().flatten().distinct().forEach { write(it) }
             }
             EntryType.METHOD -> {
-                write("import tk.hack5.ktelegram.core.TLMethod")
+                write("import tk.hack5.ktelegram.core.tl.TLMethod")
                 val type = entry.type.substringAfter("?").substringAfter("<").substringBefore(">")
                 if (type in PRIMITIVE_TYPES)
-                    write("import tk.hack5.ktelegram.core.${type.capitalize()}Object")
+                    write("import tk.hack5.ktelegram.core.tl.${type.capitalize()}Object")
                 entry.params.asSequence().map { it.type.toLowerCase().split("?", "<", ">") }.flatten().map {
                     when {
-                        it.startsWith("!") -> listOf("import tk.hack5.ktelegram.core.TLObject")
+                        it.startsWith("!") -> listOf("import tk.hack5.ktelegram.core.tl.TLObject")
                         it == "int128" || it == "int256" -> listOf(
-                            "import tk.hack5.ktelegram.core.asTlObject${it.takeLast(3)}",
-                            "import org.gciatto.kt.math.BigInteger")
+                            "import tk.hack5.ktelegram.core.tl.asTlObject${it.takeLast(3)}",
+                            "import org.gciatto.kt.math.BigInteger"
+                        )
                         else -> null
                     } }.filterNotNull().flatten().distinct().forEach { write(it) }
             }
         }
         if (entry.params.any { it.type.split("?").last().toLowerCase() in PRIMITIVE_TYPES + Pair("bool", "") })
-            write("import tk.hack5.ktelegram.core.asTlObject")
+            write("import tk.hack5.ktelegram.core.tl.asTlObject")
         write()
     }
     private fun writeClassDef() {
@@ -362,7 +366,7 @@ class TypeKtWriter(output: (String) -> Unit, typeName: String, packageName: Stri
     }
 
     private fun writeImports() {
-        write("import tk.hack5.ktelegram.core.TLObject")
+        write("import tk.hack5.ktelegram.core.tl.TLObject")
         write()
     }
     private fun writeInterfaceDef() = write("interface ${tlName}Type : TLObject<${tlName}Type>")
@@ -440,24 +444,49 @@ private fun fixDeserialization(name: String, type: String, _internal: Boolean = 
                 val generic = type.split("<", ">")[1]
                 generic.substringAfterLast(".").first().let {
                     if (it.toLowerCase() != it) {
-                        listOf(Pair((if (!_internal) "val ${name}_param = " else "") +
-                                "(VectorObject.fromTlRepr<${fixNamespace(formatType(generic))}>" +
-                                "(data.sliceArray(dataOffset until data.size), $bare) ?: error(\"Unable to deserialize data\"))", 0))
+                        listOf(
+                            Pair(
+                                (if (!_internal) "val ${name}_param = " else "") +
+                                        "(VectorObject.fromTlRepr<${fixNamespace(formatType(generic))}>" +
+                                        "(data.sliceArray(dataOffset until data.size), $bare) ?: error(\"Unable to deserialize data\"))",
+                                0
+                            )
+                        )
                     } else {
-                        listOf(Pair((if (!_internal) "val ${name}_param = " else "") +
-                                "(VectorObject.fromTlRepr(data.sliceArray(dataOffset until data.size), $bare, " +
-                                fixType(generic, true) + ") ?: error(\"Unable to deserialize data\"))", 0))
+                        listOf(
+                            Pair(
+                                (if (!_internal) "val ${name}_param = " else "") +
+                                        "(VectorObject.fromTlRepr(data.sliceArray(dataOffset until data.size), $bare, " +
+                                        fixType(generic, true) + ") ?: error(\"Unable to deserialize data\"))", 0
+                            )
+                        )
                     }
                 }
 
             }
-            char.toLowerCase() != char -> listOf(Pair("@Suppress(\"UNCHECKED_CAST\")", 0),
-                Pair((if (!_internal) "val ${name}_param = " else "") + "((TlMappings.CONSTRUCTORS[data[dataOffset]] " +
-                        "?: error(\"Attempting to deserialize unrecognized datatype\"))." +
-                        "fromTlRepr(data.sliceArray(dataOffset until data.size)) ?: error(\"Unable to deserialize data\")) as " +
-                        "Pair<Int, " + fixNamespace(formatType(type)) + ">", 0))
-            else -> listOf(Pair((if (!_internal) "val ${name}_param = " else "") + formatType(type) +
-                    ".fromTlRepr(data.sliceArray(dataOffset until data.size), true) ?: error(\"Unable to deserialize data\")", 0))
+            type == "Object" -> listOf(
+                Pair(
+                    (if (!_internal) "val ${name}_param = " else "") + "ObjectObject." +
+                            "fromTlRepr(data.sliceArray(dataOffset until data.size)) ?: error(\"Unable to deserialize data\")",
+                    0
+                )
+            )
+            char.toLowerCase() != char -> listOf(
+                Pair("@Suppress(\"UNCHECKED_CAST\")", 0),
+                Pair(
+                    (if (!_internal) "val ${name}_param = " else "") + "((TlMappings.CONSTRUCTORS[data[dataOffset]] " +
+                            "?: error(\"Attempting to deserialize unrecognized datatype\"))." +
+                            "fromTlRepr(data.sliceArray(dataOffset until data.size)) ?: error(\"Unable to deserialize data\")) as " +
+                            "Pair<Int, " + fixNamespace(formatType(type)) + ">", 0
+                )
+            )
+            else -> listOf(
+                Pair(
+                    (if (!_internal) "val ${name}_param = " else "") + formatType(type) +
+                            ".fromTlRepr(data.sliceArray(dataOffset until data.size), true) ?: error(\"Unable to deserialize data\")",
+                    0
+                )
+            )
         } + Pair("dataOffset += ${name}_param${if (_internal) "?" else ""}.first${if (_internal) " ?: 0" else ""}", 0)
 
     }

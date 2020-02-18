@@ -19,8 +19,7 @@
 package tk.hack5.ktelegram.core
 
 import org.gciatto.kt.math.BigInteger
-import tk.hack5.ktelegram.core.tl.VectorObject
-import tk.hack5.ktelegram.core.tl.asTlObject
+import tk.hack5.ktelegram.core.tl.*
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -121,7 +120,10 @@ class VectorTest {
     @Test
     fun testEmptyVector() {
         testVector(listOf(), true, IntObject, intArrayOf(0))
-        testVector(listOf(0.asTlObject()), false, IntObject, intArrayOf(VectorObject._id.toInt(), 1, 0))
+        testVector(
+            listOf(0.asTlObject()), false,
+            IntObject, intArrayOf(VectorObject._id.toInt(), 1, 0)
+        )
     }
 }
 

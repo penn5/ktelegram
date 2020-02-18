@@ -16,11 +16,7 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-package tk.hack5.ktelegram.core
-
-import tk.hack5.ktelegram.core.tl.BoolFalseObject
-import tk.hack5.ktelegram.core.tl.BoolTrueObject
-import tk.hack5.ktelegram.core.tl.TrueObject
+package tk.hack5.ktelegram.core.tl
 
 fun Boolean.asTlFlag() = if (this) TrueObject() else null
 

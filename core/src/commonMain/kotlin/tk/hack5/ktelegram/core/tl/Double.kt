@@ -16,27 +16,33 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-package tk.hack5.ktelegram.core
+package tk.hack5.ktelegram.core.tl
 
-fun Long.asTlObject() = LongObject(this, true)
+fun Double.asTlObject() = DoubleObject(this, true)
 
-class LongObject(private val long: Long, override val bare: Boolean) : TLObject<Long> {
+class DoubleObject(private val double: Double, override val bare: Boolean) :
+    TLObject<Double> {
     @ExperimentalUnsignedTypes
     override fun _toTlRepr(): IntArray {
-        val firstByte = long.toULong().toInt()
-        val secondByte = long.toULong().shr(UInt.SIZE_BITS).toUInt().toInt()
-        return intArrayOf(firstByte, secondByte)
+        return LongObject(double.toRawBits(), bare)._toTlRepr()
     }
 
-    override val native = long
+    override val native = double
 
     @ExperimentalUnsignedTypes
     override val _id = Companion._id
 
-    companion object : TLConstructor<LongObject> {
+    companion object :
+        TLConstructor<DoubleObject> {
         @ExperimentalUnsignedTypes
-        override fun _fromTlRepr(data: IntArray): Pair<Int, LongObject>? {
-            return Pair(2, LongObject((data[1].toUInt().toULong().shl(UInt.SIZE_BITS) + data[0].toUInt().toULong()).toLong(), true))
+        override fun _fromTlRepr(data: IntArray): Pair<Int, DoubleObject>? {
+            val ret = LongObject._fromTlRepr(data)
+            return ret?.let {
+                Pair(
+                    it.first,
+                    DoubleObject(Double.fromBits(it.second.native), true)
+                )
+            }
         }
 
         @ExperimentalUnsignedTypes

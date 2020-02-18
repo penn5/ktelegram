@@ -19,8 +19,11 @@
 package tk.hack5.ktelegram.core.client
 
 import com.soywiz.krypto.SecureRandom
-import tk.hack5.ktelegram.core.TLMethod
-import tk.hack5.ktelegram.core.TLObject
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import tk.hack5.ktelegram.core.auth.authenticate
 import tk.hack5.ktelegram.core.connection.Connection
 import tk.hack5.ktelegram.core.connection.TcpFullConnection
@@ -29,10 +32,12 @@ import tk.hack5.ktelegram.core.crypto.RSAEncoder
 import tk.hack5.ktelegram.core.crypto.RSAEncoderImpl
 import tk.hack5.ktelegram.core.encoder.EncryptedMTProtoEncoder
 import tk.hack5.ktelegram.core.encoder.MTProtoEncoder
+import tk.hack5.ktelegram.core.encoder.MTProtoEncoderWrapped
 import tk.hack5.ktelegram.core.encoder.PlaintextMTProtoEncoder
+import tk.hack5.ktelegram.core.packer.MessagePackerUnpacker
+import tk.hack5.ktelegram.core.state.MTProtoState
 import tk.hack5.ktelegram.core.state.MTProtoStateImpl
-import tk.hack5.ktelegram.core.toByteArray
-import tk.hack5.ktelegram.core.toIntArray
+import tk.hack5.ktelegram.core.tl.*
 
 private const val tag = "TelegramClient"
 
@@ -43,30 +48,76 @@ abstract class TelegramClient {
     abstract suspend fun connect(
         connection: (String, Int) -> Connection = ::TcpFullConnection,
         plaintextEncoder: MTProtoEncoder = PlaintextMTProtoEncoder(MTProtoStateImpl()),
-        encryptedEncoder: MTProtoEncoder = EncryptedMTProtoEncoder(plaintextEncoder.state),
+        encryptedEncoderConstructor: (MTProtoState) -> EncryptedMTProtoEncoder = {
+            EncryptedMTProtoEncoder(it)
+        },
         rsaEncoder: RSAEncoder = RSAEncoderImpl
     )
 
     internal abstract suspend fun <R : TLObject<*>> send(request: TLMethod<R>, encoder: MTProtoEncoder): R
+    abstract suspend fun <R : TLObject<*>> sendWrapped(request: TLMethod<R>, encoder: MTProtoEncoderWrapped): R
 }
 
 open class TelegramClientImpl(override val apiId: String, override val apiHash: String) : TelegramClient() {
     override var secureRandom = SecureRandom()
     protected var connection: Connection? = null
-    protected var encoder: MTProtoEncoder? = null
-    protected var rsaEncoder: RSAEncoder? = null
+    protected var encoder: EncryptedMTProtoEncoder? = null
     protected var authKey: AuthKey? = null
+    protected var recvChannel: Channel<TLObject<*>>? = null
+    protected var unpacker: MessagePackerUnpacker? = null
+
 
     override suspend fun connect(
         connection: (String, Int) -> Connection,
         plaintextEncoder: MTProtoEncoder,
-        encryptedEncoder: MTProtoEncoder,
+        encryptedEncoderConstructor: (MTProtoState) -> EncryptedMTProtoEncoder,
         rsaEncoder: RSAEncoder
-    ) {
+    ) = coroutineScope {
         connection("149.154.167.51", 80).let {
-            this.connection = it
+            this@TelegramClientImpl.connection = it
             it.connect()
-            authKey = authenticate(this, plaintextEncoder)
+            authKey = authenticate(this@TelegramClientImpl, plaintextEncoder)
+            MTProtoStateImpl(authKey).let { state ->
+                encoder = encryptedEncoderConstructor(state)
+                unpacker = MessagePackerUnpacker(it, encoder!!, state)
+            }
+            GlobalScope.launch {
+                startRecvLoop()
+            }
+            launch {
+                delay(1000)
+                sendWrapped(Help_GetConfigRequest(), encoder!!)
+            }
+            sendWrapped(
+                InvokeWithLayerRequest(
+                    105,
+                    InitConnectionRequest(
+                        apiId.toInt(),
+                        "urmom",
+                        "1.2.3",
+                        "1.2.3",
+                        "en",
+                        "",
+                        "en",
+                        null,
+                        Help_GetConfigRequest()
+                    )
+                ), encoder!!
+            )
+            //sendWrapped(Help_GetConfigRequest(), encoder!!)
+//            sendWrapped(InvokeWithLayerRequest(100, InitConnectionRequest(apiId.toInt(), apiHash, "urmom", "1.2.3", "en", "", "en", null, Help_GetConfigRequest())), encoder!!)
+//            sendWrapped(InvokeWithLayerRequest(105, Help_GetConfigRequest()), encoder!!)
+            Unit
+        }
+    }
+
+    protected suspend fun startRecvLoop() = coroutineScope {
+        val byteChannel = Channel<ByteArray>()
+        launch {
+            connection!!.recvLoop(byteChannel)
+        }
+        launch {
+            unpacker!!.pump(byteChannel)
         }
     }
 
@@ -75,5 +126,21 @@ open class TelegramClientImpl(override val apiId: String, override val apiHash: 
         val response = encoder.decode(connection!!.recv()).toIntArray()
         println(response.contentToString())
         return request.constructor.fromTlRepr(response)!!.second
+    }
+
+    override suspend fun <R : TLObject<*>> sendWrapped(request: TLMethod<R>, encoder: MTProtoEncoderWrapped): R {
+        return unpacker!!.sendAndRecv(request) as R
+        /*
+        connection!!.send(encoder.wrapAndEncode(request))
+        val response = encoder.decodeAndUnwrap(recvChannel)
+        println(response)
+        when(response) {
+            is BadServerSaltObject -> {
+                encoder.state.salt = response.newServerSalt.asTlObject().toTlRepr().toByteArray()
+                return sendWrapped(request, encoder)
+            }
+        }
+        return response as R
+        */
     }
 }

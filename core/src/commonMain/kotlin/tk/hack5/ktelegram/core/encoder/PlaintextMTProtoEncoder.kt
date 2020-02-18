@@ -18,9 +18,8 @@
 
 package tk.hack5.ktelegram.core.encoder
 
-import tk.hack5.ktelegram.core.*
 import tk.hack5.ktelegram.core.state.MTProtoState
-import tk.hack5.ktelegram.core.toByteArray
+import tk.hack5.ktelegram.core.tl.*
 
 class PlaintextMTProtoEncoder(state: MTProtoState) : MTProtoEncoder(state) {
     var isFirstResponse = true

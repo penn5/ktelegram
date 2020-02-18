@@ -18,7 +18,7 @@
 
 @file:Suppress("PropertyName", "FunctionName")
 
-package tk.hack5.ktelegram.core
+package tk.hack5.ktelegram.core.tl
 
 interface TLObject<N> {
     val bare: Boolean
@@ -59,7 +59,8 @@ interface TLConstructor<T : TLObject<*>> {
     val _id: UInt?
 }
 
-interface TLMethod<R : TLObject<*>> : TLObject<TLMethod<R>> {
+interface TLMethod<R : TLObject<*>> :
+    TLObject<TLMethod<R>> {
     @ExperimentalUnsignedTypes
     override val _id: UInt
 

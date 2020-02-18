@@ -20,9 +20,9 @@ package tk.hack5.ktelegram.core.crypto
 
 import com.soywiz.krypto.sha1
 import org.gciatto.kt.math.BigInteger
-import tk.hack5.ktelegram.core.asTlObject128
-import tk.hack5.ktelegram.core.asTlObject256
-import tk.hack5.ktelegram.core.toByteArray
+import tk.hack5.ktelegram.core.tl.asTlObject128
+import tk.hack5.ktelegram.core.tl.asTlObject256
+import tk.hack5.ktelegram.core.tl.toByteArray
 
 fun generateKeyFromNonce(serverNonce: BigInteger, newNonce: BigInteger): Pair<ByteArray, ByteArray> {
     val serverBytes = serverNonce.asTlObject128().toTlRepr().toByteArray()
