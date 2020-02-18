@@ -28,9 +28,6 @@ import tk.hack5.ktelegram.core.tl.toByteArray
 import tk.hack5.ktelegram.core.tl.toIntArray
 import kotlin.jvm.JvmName
 
-const val beginKeyMagic = "-----BEGIN RSA PUBLIC KEY-----"
-const val endKeyMagic = "-----END RSA PUBLIC KEY-----"
-
 interface RSAEncoder {
     fun loadPubKeys()
     fun loadPubKey(key: RSAPublicKey)

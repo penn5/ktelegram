@@ -22,16 +22,27 @@ import com.github.aakira.napier.DebugAntilog
 import com.github.aakira.napier.Napier
 import kotlinx.coroutines.runBlocking
 import tk.hack5.ktelegram.core.client.TelegramClientImpl
-import tk.hack5.ktelegram.core.tl.InputPeerEmptyObject
-import tk.hack5.ktelegram.core.tl.Messages_GetDialogsRequest
 
 fun main() {
+//    System.setProperty(DEBUG_PROPERTY_NAME, "on")
     Napier.base(DebugAntilog())
-    println(Messages_GetDialogsRequest(false, null, 0, 0, InputPeerEmptyObject(), 100, 0).toTlRepr().map { it.toUInt() }.joinToString())
+//    println(Messages_GetDialogsRequest(false, null, 0, 0, InputPeerEmptyObject(), 100, 0).toTlRepr().map { it.toUInt() }.joinToString())
     amain()
 }
 
 fun amain() = runBlocking {
     val client = TelegramClientImpl("596386", "e142e0a65a50b707fa539ac91db2de16")
-    client.connect()
+    println(client.start(
+        phoneNumber = {
+            print("Phone Number: ")
+            readLine()!!
+        }, signUpConsent = { Pair("test", "account") },
+        phoneCode = {
+            print("Enter the code you received: ")
+            readLine()!!
+        }, password = {
+            print("Enter your password: ")
+            System.console().readPassword().joinToString("")
+        }
+    ))
 }

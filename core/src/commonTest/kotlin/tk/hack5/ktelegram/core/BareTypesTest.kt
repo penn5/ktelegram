@@ -32,8 +32,8 @@ class ReprStringTest {
             assertTrue(correct.contentEquals(input), "serialization ${input.contentToString()} didn't match correct")
         println(input.contentToString())
         val ret = StringObject.fromTlRepr(input, true)
-        println(ret?.second?.native)
-        assertEquals(text, ret!!.second.native, "deserialized to ${input.contentToString()}")
+        println(ret!!.second.native)
+        assertEquals(text, ret.second.native, "deserialized to ${input.contentToString()}")
     }
 
     @Test
@@ -112,9 +112,16 @@ class ReprLongTest {
 class VectorTest {
     private fun <G : TLObject<*>>testVector(input: Collection<G>, bare: Boolean, constructor: TLConstructor<G>?, expected: IntArray? = null) {
         val bytes = input.asTlObject(bare).toTlRepr()
-        assertTrue(expected?.contentEquals(bytes) ?: true, "serialization ${bytes.contentToString()} didn't match correct")
+        assertTrue(
+            expected?.contentEquals(bytes) ?: true,
+            "serialization ${bytes.contentToString()} didn't match correct"
+        )
         val new = VectorObject.fromTlRepr(bytes, bare, constructor)
-        assertEquals(input.map { it.native }.toList(), new?.second?.native?.map { it.native }?.toList()!!, "deserialization of ${bytes.contentToString()} didn't match")
+        assertEquals(
+            input.map { it.native }.toList(),
+            new!!.second.native.map { it.native }.toList(),
+            "deserialization of ${bytes.contentToString()} didn't match"
+        )
     }
 
     @Test

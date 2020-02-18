@@ -18,8 +18,6 @@
 
 package tk.hack5.ktelegram.core.tl
 
-fun Boolean.asTlFlag() = if (this) TrueObject() else null
-
 fun Boolean.asTlObject() = if (this) BoolTrueObject() else BoolFalseObject()
 fun Boolean?.asTlObject() = when (this) {
     true -> BoolTrueObject()

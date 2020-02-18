@@ -20,7 +20,6 @@ package tk.hack5.ktelegram.core.crypto
 
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
-import kotlin.experimental.xor
 
 // https://stackoverflow.com/questions/17797582/java-aes-256-decrypt-with-ige
 
@@ -38,31 +37,4 @@ actual class AESPlatformImpl actual constructor(mode: AESMode, key: ByteArray) :
     override fun doECB(data: ByteArray) = cipher.doFinal(data)!!
 
     override val blockSize = cipher.blockSize
-}
-
-
-fun decryptAesIge(key: ByteArray, iv: ByteArray, message: ByteArray): ByteArray {
-    val cipher = Cipher.getInstance("AES/ECB/NoPadding")
-    cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"))
-    val blocksize = cipher.blockSize
-    var xPrev = iv.copyOfRange(0, blocksize)
-    var yPrev = iv.copyOfRange(blocksize, iv.size)
-    var decrypted = ByteArray(0)
-    var y: ByteArray
-    var x: ByteArray
-    var i = 0
-    while (i < message.size) {
-        x = message.copyOfRange(i, i + blocksize)
-        y = xor(cipher.doFinal(xor(x, yPrev)), xPrev)
-        xPrev = x
-        yPrev = y
-        decrypted += y
-        i += blocksize
-    }
-    return decrypted
-}
-
-private fun xor(a: ByteArray, b: ByteArray): ByteArray {
-    require (a.size == b.size) { "Invalid sizes" }
-    return a.mapIndexed { index, byte -> byte.xor(b[index]) }.toByteArray()
 }

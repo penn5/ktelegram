@@ -31,17 +31,18 @@ import tk.hack5.ktelegram.core.utils.GZIPImpl
 
 private const val tag = "MessagePackerUnpacker"
 
-class MessagePackerUnpacker(val connection: Connection, val encoder: EncryptedMTProtoEncoder, val state: MTProtoState) {
+class MessagePackerUnpacker(
+    private val connection: Connection,
+    private val encoder: EncryptedMTProtoEncoder,
+    private val state: MTProtoState
+) {
     private val incomingMessages = Channel<MessageUnpackAction>()
 
     suspend fun sendAndRecv(message: TLMethod<*>): TLObject<*> {
         connection.send(encoder.wrapAndEncode(message))
         return when (val action = incomingMessages.receive()) {
             is MessageUnpackActionRetry -> sendAndRecv(message)
-            is MessageUnpackActionReturn -> {
-                println(action)
-                action.value
-            }
+            is MessageUnpackActionReturn -> action.value
         }
     }
 
@@ -50,7 +51,6 @@ class MessagePackerUnpacker(val connection: Connection, val encoder: EncryptedMT
             try {
                 val b = input.receive()
                 val d = encoder.decode(b)
-                println("raw data = ${d.toUByteArray().contentToString()}")
                 val m = MessageObject.fromTlRepr(d.toIntArray(), bare = true)!!.second
                 unpackMessage(m)
             } catch (e: CancellationException) {
@@ -61,7 +61,7 @@ class MessagePackerUnpacker(val connection: Connection, val encoder: EncryptedMT
         }
     }
 
-    suspend fun unpackMessage(message: TLObject<*>, msgId: Long? = null) {
+    private suspend fun unpackMessage(message: TLObject<*>, msgId: Long? = null) {
         try {
             println("msg = $message")
             if (message is MessageObject)
@@ -131,7 +131,7 @@ class MessagePackerUnpacker(val connection: Connection, val encoder: EncryptedMT
         }
     }
 
-    suspend fun handleMaybeGzipped(message: ObjectType): TLObject<*> {
+    private suspend fun handleMaybeGzipped(message: ObjectType): TLObject<*> {
         return when (message) {
             is ObjectObject -> {
                 message.innerObject
@@ -144,7 +144,7 @@ class MessagePackerUnpacker(val connection: Connection, val encoder: EncryptedMT
     }
 }
 
-sealed class MessageUnpackAction(val req_msg_id: Long)
+sealed class MessageUnpackAction(val reqMsgId: Long)
 
-class MessageUnpackActionRetry(req_msg_id: Long) : MessageUnpackAction(req_msg_id)
-class MessageUnpackActionReturn(req_msg_id: Long, val value: TLObject<*>) : MessageUnpackAction(req_msg_id)
+class MessageUnpackActionRetry(reqMsgId: Long) : MessageUnpackAction(reqMsgId)
+class MessageUnpackActionReturn(reqMsgId: Long, val value: TLObject<*>) : MessageUnpackAction(reqMsgId)

@@ -27,52 +27,67 @@ import tk.hack5.ktelegram.core.auth.authenticate
 import tk.hack5.ktelegram.core.connection.Connection
 import tk.hack5.ktelegram.core.connection.TcpFullConnection
 import tk.hack5.ktelegram.core.crypto.AuthKey
-import tk.hack5.ktelegram.core.crypto.RSAEncoder
-import tk.hack5.ktelegram.core.crypto.RSAEncoderImpl
 import tk.hack5.ktelegram.core.encoder.EncryptedMTProtoEncoder
 import tk.hack5.ktelegram.core.encoder.MTProtoEncoder
 import tk.hack5.ktelegram.core.encoder.MTProtoEncoderWrapped
 import tk.hack5.ktelegram.core.encoder.PlaintextMTProtoEncoder
+import tk.hack5.ktelegram.core.errors.BadRequestError
+import tk.hack5.ktelegram.core.errors.RedirectedError
+import tk.hack5.ktelegram.core.errors.RpcError
+import tk.hack5.ktelegram.core.mtproto.RpcErrorObject
 import tk.hack5.ktelegram.core.packer.MessagePackerUnpacker
 import tk.hack5.ktelegram.core.state.MTProtoState
 import tk.hack5.ktelegram.core.state.MTProtoStateImpl
+import tk.hack5.ktelegram.core.state.MemorySession
+import tk.hack5.ktelegram.core.state.Session
 import tk.hack5.ktelegram.core.tl.*
 
 private const val tag = "TelegramClient"
 
 abstract class TelegramClient {
     internal abstract val secureRandom: SecureRandom
-    abstract val apiId: String
-    abstract val apiHash: String
-    abstract suspend fun connect(
-        connection: (String, Int) -> Connection = ::TcpFullConnection,
-        plaintextEncoder: MTProtoEncoder = PlaintextMTProtoEncoder(MTProtoStateImpl()),
-        encryptedEncoderConstructor: (MTProtoState) -> EncryptedMTProtoEncoder = {
-            EncryptedMTProtoEncoder(it)
-        },
-        rsaEncoder: RSAEncoder = RSAEncoderImpl
-    )
+    abstract suspend fun connect()
 
     internal abstract suspend fun <R : TLObject<*>> send(request: TLMethod<R>, encoder: MTProtoEncoder): R
-    abstract suspend fun <R : TLObject<*>> sendWrapped(request: TLMethod<R>, encoder: MTProtoEncoderWrapped): R
+    protected abstract suspend fun <R : TLObject<*>> sendWrapped(
+        request: TLMethod<R>,
+        encoder: MTProtoEncoderWrapped
+    ): R
+
+    abstract suspend operator fun <R : TLObject<*>> invoke(request: TLMethod<R>): R
+    abstract suspend fun start(
+        phoneNumber: () -> String = { "9996627244" },
+        signUpConsent: (Help_TermsOfServiceObject?) -> Pair<String, String>? = { null },
+        phoneCode: () -> String = { "22222" },
+        password: () -> String = { "" }
+    ): UserType
+
+    abstract suspend fun disconnect()
 }
 
-open class TelegramClientImpl(override val apiId: String, override val apiHash: String) : TelegramClient() {
+open class TelegramClientImpl(
+    protected val apiId: String, protected val apiHash: String,
+    protected val connectionConstructor: (String, Int) -> Connection = ::TcpFullConnection,
+    protected val plaintextEncoder: MTProtoEncoder = PlaintextMTProtoEncoder(MTProtoStateImpl()),
+    protected val encryptedEncoderConstructor: (MTProtoState) -> EncryptedMTProtoEncoder = { EncryptedMTProtoEncoder(it) },
+    protected val deviceModel: String = "ktg",
+    protected val systemVersion: String = "0.0.1",
+    protected val appVersion: String = "0.0.1",
+    protected val systemLangCode: String = "en",
+    protected val langPack: String = "",
+    protected val langCode: String = "en",
+    protected var session: Session<*> = MemorySession()
+) : TelegramClient() {
     override var secureRandom = SecureRandom()
     protected var connection: Connection? = null
     protected var encoder: EncryptedMTProtoEncoder? = null
     protected var authKey: AuthKey? = null
-    protected var recvChannel: Channel<TLObject<*>>? = null
     protected var unpacker: MessagePackerUnpacker? = null
+    protected var serverConfig: ConfigObject? = null
 
 
-    override suspend fun connect(
-        connection: (String, Int) -> Connection,
-        plaintextEncoder: MTProtoEncoder,
-        encryptedEncoderConstructor: (MTProtoState) -> EncryptedMTProtoEncoder,
-        rsaEncoder: RSAEncoder
-    ) {
-        connection("149.154.167.51", 80).let {
+    override suspend fun connect() {
+        connectionConstructor(session.ipAddress, session.port).let {
             this@TelegramClientImpl.connection = it
             it.connect()
             authKey = authenticate(this@TelegramClientImpl, plaintextEncoder)
@@ -83,25 +98,91 @@ open class TelegramClientImpl(override val apiId: String, override val apiHash: 
             GlobalScope.launch {
                 startRecvLoop()
             }
-            println("NEAREST DC IS ${sendWrapped(Help_GetNearestDcRequest(), encoder!!)}")
-            println(
-                "config is " + sendWrapped(
-                    InvokeWithLayerRequest(
-                        108,
-                        InitConnectionRequest(
-                            apiId.toInt(),
-                            "urmom",
-                            "1.2.3",
-                            "1.2.3",
-                            "en",
-                            "",
-                            "en",
-                            null,
-                            Help_GetConfigRequest()
-                        )
-                    ), encoder!!
+            this(Help_GetNearestDcRequest()) // First request has to be an unchanged request from the first layer
+            serverConfig = this(
+                InvokeWithLayerRequest(
+                    108,
+                    InitConnectionRequest(
+                        apiId.toInt(),
+                        deviceModel,
+                        systemVersion,
+                        appVersion,
+                        systemLangCode,
+                        langPack,
+                        langCode,
+                        null,
+                        Help_GetConfigRequest()
+                    )
                 )
-            )
+            ) as ConfigObject
+        }
+    }
+
+    override suspend fun disconnect() {
+        connection?.disconnect()
+        connection = null
+    }
+
+    override suspend fun start(
+        phoneNumber: () -> String,
+        signUpConsent: (Help_TermsOfServiceObject?) -> Pair<String, String>?,
+        phoneCode: () -> String,
+        password: () -> String
+    ): UserType {
+        connect()
+        val phone = phoneNumber()
+        val sentCode =
+            try {
+                this(
+                    Auth_SendCodeRequest(
+                        phone, apiId.toInt(), apiHash, CodeSettingsObject(
+                            allowFlashcall = false,
+                            currentNumber = false,
+                            allowAppHash = false
+                        )
+                    )
+                ) as Auth_SentCodeObject
+            } catch (e: RedirectedError.PhoneMigrateError) {
+                disconnect()
+                val newDc = serverConfig!!.dcOptions.map { it as DcOptionObject }.filter { it.id == e.dc }.first()
+                session = session.setDc(e.dc, newDc.ipAddress, newDc.port)
+                return start({ phone }, signUpConsent, phoneCode, password)
+            }
+        val auth = try {
+            this(Auth_SignInRequest(phone, sentCode.phoneCodeHash, phoneCode()))
+        } catch (e: BadRequestError.SessionPasswordNeededError) {
+            /*
+            val passwd = password()
+            val remotePassword = this(Account_GetPasswordRequest()) as Account_PasswordObject
+            when (remotePassword.currentAlgo) {
+                is PasswordKdfAlgoSHA256SHA256PBKDF2HMACSHA512iter100000SHA256ModPowObject -> {
+                    // TODO https://github.com/korlibs/krypto/issues/12
+                    val g = remotePassword.currentAlgo.g.toByteArray(256)
+                    val p = remotePassword.currentAlgo.p.pad(256)
+                    val k = (p + g).sha256()
+                    val a = getSecureNonce()
+                    val u = ()
+                }
+                else -> error("Invalid password algo")
+            }*/
+            // TODO 2fa
+            throw e
+        }
+        when (auth) {
+            is Auth_AuthorizationSignUpRequiredObject -> {
+                val name = signUpConsent(auth.termsOfService as Help_TermsOfServiceObject)
+                require(name != null) { "Terms of Service were not accepted" }
+                when (val newAuth = this(Auth_SignUpRequest(phone, sentCode.phoneCodeHash, name.first, name.second))) {
+                    is Auth_AuthorizationObject -> {
+                        return newAuth.user
+                    }
+                    else -> error("Signup failed")
+                }
+            }
+            is Auth_AuthorizationObject -> {
+                return auth.user
+            }
+            else -> error("Login failed")
         }
     }
 
@@ -123,18 +204,12 @@ open class TelegramClientImpl(override val apiId: String, override val apiHash: 
     }
 
     override suspend fun <R : TLObject<*>> sendWrapped(request: TLMethod<R>, encoder: MTProtoEncoderWrapped): R {
-        return unpacker!!.sendAndRecv(request) as R
-        /*
-        connection!!.send(encoder.wrapAndEncode(request))
-        val response = encoder.decodeAndUnwrap(recvChannel)
-        println(response)
-        when(response) {
-            is BadServerSaltObject -> {
-                encoder.state.salt = response.newServerSalt.asTlObject().toTlRepr().toByteArray()
-                return sendWrapped(request, encoder)
-            }
-        }
-        return response as R
-        */
+        val ret = unpacker!!.sendAndRecv(request)
+        if (ret is RpcErrorObject)
+            throw RpcError(ret.errorCode, ret.errorMessage)
+        @Suppress("UNCHECKED_CAST")
+        return ret as R
     }
+
+    override suspend operator fun <R : TLObject<*>> invoke(request: TLMethod<R>): R = sendWrapped(request, encoder!!)
 }

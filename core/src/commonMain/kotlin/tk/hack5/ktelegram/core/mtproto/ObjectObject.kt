@@ -41,13 +41,11 @@ data class ObjectObject(val innerObject: TLObject<*>) : ObjectType {
     override val native = this
 
     @ExperimentalUnsignedTypes
-    override val _id
-        get() = null
+    override val _id: UInt? = null
 
     companion object : TLConstructor<ObjectType> {
         @ExperimentalUnsignedTypes
-        override val _id
-            get() = null
+        override val _id: UInt? = null
 
         /**
          * Returns an ObjectObject (bare wrapper) if the object doesn't fit as a ObjectType

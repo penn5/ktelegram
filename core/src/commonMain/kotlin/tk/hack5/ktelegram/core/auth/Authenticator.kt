@@ -222,7 +222,7 @@ internal fun validateNewNonceHash(newNonceHash: BigInteger, i: Int, newNonce: Bi
     require(hash.sliceArray(4 until 20).reversedArray().contentEquals(newNonceHash.toByteArray())) { "Invalid new nonce hash" }
 }
 
-private fun getSecureNonce(bits: Int = 128, secureRandom: Random): BigInteger {
+internal fun getSecureNonce(bits: Int = 128, secureRandom: Random): BigInteger {
     var nonce = BigInteger(bits - 1, secureRandom)
     if (secureRandom.nextBoolean())
         nonce = -nonce

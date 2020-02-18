@@ -18,10 +18,9 @@
 
 package tk.hack5.ktelegram.core
 
-import tk.hack5.ktelegram.core.tl.TlMappings as TlTlMappings
 import tk.hack5.ktelegram.core.mtproto.TlMappings as MTProtoTlMappings
+import tk.hack5.ktelegram.core.tl.TlMappings as TlTlMappings
 
 object TlMappings {
-    val OBJECTS = TlTlMappings.OBJECTS + MTProtoTlMappings.OBJECTS
     val CONSTRUCTORS = TlTlMappings.CONSTRUCTORS + MTProtoTlMappings.CONSTRUCTORS
 }

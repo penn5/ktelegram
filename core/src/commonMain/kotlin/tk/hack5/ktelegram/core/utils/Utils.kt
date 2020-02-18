@@ -19,9 +19,9 @@
 package tk.hack5.ktelegram.core.utils
 
 fun ByteArray.pad(size: Int, padding: Byte = 0.toByte()): ByteArray {
-    if (this.size == size)
-        return this
-    else if (this.size > size)
-        return this.drop(this.size - size).toByteArray()
-    else return ByteArray(size - this.size) { padding } + this
+    return when {
+        this.size == size -> this
+        this.size > size -> this.drop(this.size - size).toByteArray()
+        else -> ByteArray(size - this.size) { padding } + this
+    }
 }

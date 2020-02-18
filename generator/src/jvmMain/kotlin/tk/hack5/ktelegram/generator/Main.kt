@@ -24,7 +24,8 @@ import java.io.BufferedWriter
 import java.io.File
 
 @ExperimentalUnsignedTypes
-fun parseAndSave(inputFile: File, outputDir: String, packageName: String) {
+fun parseAndSave(inputPath: String, outputDir: String, packageName: String) {
+    val inputFile = File(inputPath)
     val data = Json(JsonConfiguration.Stable).parse(TLData.serializer(), inputFile.readText())
     println(data)
     var file: File
@@ -67,8 +68,29 @@ fun parseAndSave(inputFile: File, outputDir: String, packageName: String) {
     bufferedWriter.close()
 }
 
+fun writeErrors(input: String, outputPath: String, packageName: String) {
+    val file = File(outputPath)
+    file.parentFile.mkdirs()
+    val writer = file.bufferedWriter()
+    ErrorsWriter({ writer.write(it) }, packageName, File(input).readLines().drop(1).map { Error(it) }).build()
+    writer.close()
+}
+
 @ExperimentalUnsignedTypes
 fun main() {
-    parseAndSave(File("resources/schema.json"), "../core/generated/commonMain/kotlin/tk/hack5/ktelegram/core/tl", "tk.hack5.ktelegram.core.tl")
-    parseAndSave(File("resources/schema-mtproto.json"), "../core/generated/commonMain/kotlin/tk/hack5/ktelegram/core/mtproto", "tk.hack5.ktelegram.core.mtproto")
+    parseAndSave(
+        "resources/schema.json",
+        "../core/generated/commonMain/tk/hack5/ktelegram/core/tl",
+        "tk.hack5.ktelegram.core.tl"
+    )
+    parseAndSave(
+        "resources/schema-mtproto.json",
+        "../core/generated/commonMain/tk/hack5/ktelegram/core/mtproto",
+        "tk.hack5.ktelegram.core.mtproto"
+    )
+    writeErrors(
+        "resources/errors.csv",
+        "../core/generated/commonMain/tk/hack5/ktelegram/core/errors/Errors.kt",
+        "tk.hack5.ktelegram.core.errors"
+    )
 }

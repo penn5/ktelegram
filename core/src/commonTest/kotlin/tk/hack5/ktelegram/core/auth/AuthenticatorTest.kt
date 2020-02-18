@@ -23,13 +23,14 @@ import tk.hack5.ktelegram.core.crypto.AuthKey
 import tk.hack5.ktelegram.core.mtproto.DhGenOkObject
 import tk.hack5.ktelegram.core.mtproto.ResPQObject
 import tk.hack5.ktelegram.core.mtproto.ServerDHParamsOkObject
+import tk.hack5.ktelegram.core.tl.toByteArray
 import tk.hack5.ktelegram.core.tl.toIntArray
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 class AuthenticatorTest {
-    var randomIndex = 0
+    private var randomIndex = 0
 
     @Test
     fun authenticate() {

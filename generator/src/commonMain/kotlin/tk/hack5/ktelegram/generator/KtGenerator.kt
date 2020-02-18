@@ -34,10 +34,14 @@ sealed class KtWriter(private val output: (String) -> Unit, private val packageN
         if (indent > 0)
             indentationLevel += indent
     }
-    protected fun writeHeader() {
-        write("@file:Suppress(\"ObjectPropertyName\", \"ClassName\", \"LocalVariableName\", \"MemberVisibilityCanBePrivate\")")
+
+    protected fun writeHeader(writeSuppressions: Boolean = true) {
+        if (writeSuppressions)
+            write("@file:Suppress(\"ObjectPropertyName\", \"ClassName\", \"LocalVariableName\", \"MemberVisibilityCanBePrivate\", \"SpellCheckingInspection\")")
+        else
+            write("@file:Suppress(\"SpellCheckingInspection\")")
         write()
-        write("")
+        write()
         write()
         write("package $packageName")
         write()
@@ -45,6 +49,7 @@ sealed class KtWriter(private val output: (String) -> Unit, private val packageN
         write("// See generator/src/commonMain/KtGenerator.kt")
         write()
     }
+
     protected fun writeDeclEnd() = write("}", -1)
 
     abstract fun build()
@@ -58,10 +63,6 @@ class MapKtWriter(output: (String) -> Unit, private val data: TLData, packageNam
         write("import tk.hack5.ktelegram.core.tl.TLObject")
         write()
         write("object TlMappings {", 1)
-        write("val OBJECTS = mapOf(" + data.constructors.joinToString {
-            "0x${it.id.toString(16)}L.toInt() to " +
-                    "${fixNamespace(it.name).substringBeforeLast(" ").capitalize()}Object"
-        } + ")")
         // Vectors need special serialization due to the generics, so exclude
         // them from here (they don't implement TLConstructor anyway)
         write("val CONSTRUCTORS = mapOf(" + data.constructors.filter { it.id != 0x1cb5c415U }.joinToString {
@@ -84,8 +85,6 @@ class MapKtWriter(output: (String) -> Unit, private val data: TLData, packageNam
 
 @ExperimentalUnsignedTypes
 class NormalKtWriter(output: (String) -> Unit, private val entry: TLEntry, packageName: String) : KtWriter(output, packageName, entry.name) {
-    // Search twice but nevermind
-
     private val requestExtension = if (entry.entryType == EntryType.METHOD) "Request" else "Object"
     private var genericType: String? = null
 
@@ -252,7 +251,7 @@ class NormalKtWriter(output: (String) -> Unit, private val entry: TLEntry, packa
         val extends = if (entry.entryType == EntryType.CONSTRUCTOR) {
             fixNamespace(entry.type).capitalize() + "Type"
         } else {
-            write("@Suppress(\"unused\")")
+            write("@Suppress(\"unused\", \"SpellCheckingInspection\")")
             val fixedType = fixNamespace(fixType(entry.type, true)!!)
             if (entry.type.startsWith("Vector<")) {
                 "TLMethod<$fixedType>"
@@ -369,13 +368,93 @@ class TypeKtWriter(output: (String) -> Unit, typeName: String, packageName: Stri
         write("import tk.hack5.ktelegram.core.tl.TLObject")
         write()
     }
+
     private fun writeInterfaceDef() = write("interface ${tlName}Type : TLObject<${tlName}Type>")
+}
+
+class ErrorsWriter(output: (String) -> Unit, packageName: String, private val errors: Collection<Error>) :
+    KtWriter(output, packageName) {
+    override fun build() {
+        writeHeader(false)
+        writeRootClass()
+        write()
+        writeSubClass(300..399, "Redirected")
+        write()
+        writeSubClass(400..499, "BadRequest")
+        write()
+        writeSubClass(500..599, "InternalServer")
+        write()
+        writeRegexFix()
+    }
+
+    private fun writeRootClass() {
+        write("open class RpcError(val code: Int, val id: String, message: String?) : Error(message) {", 1)
+        write("companion object {", 1)
+        write("operator fun invoke(code: Int, id: String) = when (code) {", 1)
+        write("in 300..399 -> RedirectedError(code, id)")
+        write("in 400..499 -> BadRequestError(code, id)")
+        write("in 500..599 -> InternalServerError(code, id)")
+        write("else -> RpcError(code, id, null)")
+        writeDeclEnd()
+        writeDeclEnd()
+        writeDeclEnd()
+    }
+
+    private fun writeSubClass(codes: IntRange, name: String) {
+        write("open class ${name}Error(code: Int, id: String, message: String?) : RpcError(code, id, message) {", 1)
+        write("companion object {", 1)
+        write("operator fun invoke(code: Int, id: String) = when(id) {", 1)
+        val applicableErrors = errors.filter { codes.intersect(it.codes).isNotEmpty() }
+        for (error in applicableErrors) {
+            val hasRegex = !Regex("[A-Z0-9_]+").matches(error.name)
+            write(
+                (if (!hasRegex) "\"${error.name}\"" else "in Regex(\"${error.name}\")")
+                        + " -> ${fixError(error.name)}Error(code, id" +
+                        if (hasRegex) ", Regex(\"${error.name}\").matchEntire(id)!!.groupValues[1].toInt())" else ")"
+            )
+        }
+        write("else -> ${name}Error(code, id, null)")
+        writeDeclEnd()
+        writeDeclEnd()
+
+        for (error in applicableErrors) {
+            var paramName: String? = null
+            if (error.description.contains("{"))
+                paramName = Regex("\\{([a-z]+)}").find(error.description)?.groupValues?.getOrNull(1)
+            write()
+            write(
+                "class ${fixError(error.name)}Error(code: Int, id: String" + (
+                        if (paramName != null)
+                            ", val $paramName: Int"
+                        else
+                            ""
+                        ) + ") : ${name}Error(code, id, \"${error.description}\"" + (
+                        if (paramName != null) {
+                            ".replace(\"{$paramName}\", $paramName.toString()))"
+                        } else
+                            ")"
+                        )
+            )
+        }
+        writeDeclEnd()
+    }
+
+    private fun writeRegexFix() {
+        write("@Suppress(\"NOTHING_TO_INLINE\")")
+        write("private inline operator fun Regex.contains(text: CharSequence): Boolean = matches(text)")
+    }
+}
+
+private fun fixError(name: String): String {
+    val withoutRegex = name.replace(Regex("\\(.*?\\)"), "")
+    val split = withoutRegex.split("_").filter { it.isNotEmpty() }
+    return split.joinToString("") { it.toLowerCase().capitalize() }
 }
 
 private fun fixType(type: String, raw: Boolean? = false): String? {
     if (type.isEmpty())
         return null
-    val collection = when (raw){
+    val collection = when (raw) {
         true -> Pair("VectorObject<", ">")
         false -> Pair("Collection<", ">")
         null -> Pair("", "")

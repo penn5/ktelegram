@@ -118,7 +118,6 @@ class TcpFullConnection(host: String, port: Int, network: (String, Int) -> TCPCl
     constructor(host: String, port: Int) : this(host, port, ::TCPClientImpl)
     private var counter = 0
     override suspend fun sendInternal(data: ByteArray) {
-        println("DATA IS ${data.toUByteArray().contentToString()}")
         val len = data.size + 12
         val ret = byteArrayOf(*len.toByteArray(), *counter++.toByteArray(), *data)
         val crc = calculateCRC32(ret)
