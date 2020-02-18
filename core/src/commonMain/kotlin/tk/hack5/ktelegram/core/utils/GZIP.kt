@@ -16,22 +16,11 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-package tk.hack5.ktelegram.core
+package tk.hack5.ktelegram.core.utils
 
-import com.github.aakira.napier.DebugAntilog
-import com.github.aakira.napier.Napier
-import kotlinx.coroutines.runBlocking
-import tk.hack5.ktelegram.core.client.TelegramClientImpl
-import tk.hack5.ktelegram.core.tl.InputPeerEmptyObject
-import tk.hack5.ktelegram.core.tl.Messages_GetDialogsRequest
-
-fun main() {
-    Napier.base(DebugAntilog())
-    println(Messages_GetDialogsRequest(false, null, 0, 0, InputPeerEmptyObject(), 100, 0).toTlRepr().map { it.toUInt() }.joinToString())
-    amain()
+interface GZIP {
+    fun compress(input: ByteArray): ByteArray
+    fun decompress(input: ByteArray): ByteArray
 }
 
-fun amain() = runBlocking {
-    val client = TelegramClientImpl("596386", "e142e0a65a50b707fa539ac91db2de16")
-    client.connect()
-}
+expect object GZIPImpl : GZIP

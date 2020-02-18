@@ -19,6 +19,7 @@
 package tk.hack5.ktelegram.core.packer
 
 import com.github.aakira.napier.Napier
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
 import tk.hack5.ktelegram.core.connection.Connection
 import tk.hack5.ktelegram.core.encoder.EncryptedMTProtoEncoder
@@ -26,6 +27,7 @@ import tk.hack5.ktelegram.core.mtproto.*
 import tk.hack5.ktelegram.core.mtproto.MessageObject
 import tk.hack5.ktelegram.core.state.MTProtoState
 import tk.hack5.ktelegram.core.tl.*
+import tk.hack5.ktelegram.core.utils.GZIPImpl
 
 private const val tag = "MessagePackerUnpacker"
 
@@ -48,64 +50,84 @@ class MessagePackerUnpacker(val connection: Connection, val encoder: EncryptedMT
             try {
                 val b = input.receive()
                 val d = encoder.decode(b)
-                println("raw data = d")
+                println("raw data = ${d.toUByteArray().contentToString()}")
                 val m = MessageObject.fromTlRepr(d.toIntArray(), bare = true)!!.second
                 unpackMessage(m)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                Napier.e("Dropped message due to exception", e, tag = tag)
+                Napier.e("Dropped packet due to exception", e, tag = tag)
             }
         }
     }
 
     suspend fun unpackMessage(message: TLObject<*>, msgId: Long? = null) {
-        println("msg = $message")
-        if (message is MessageObject)
-            return unpackMessage(message.body, message.msgId)
-        else
-            msgId!!
-        when (message) {
-            is ObjectType -> {
-                unpackMessage(handleMaybeGzipped(message), msgId)
-            }
-            is BadServerSaltObject -> {
-                // Fix the salt and retry the message
-                Napier.d("Bad server salt, corrected to ${message.newServerSalt}", tag = tag)
-                state.salt = message.newServerSalt.asTlObject().toTlRepr().toByteArray()
-                incomingMessages.send(MessageUnpackActionRetry(message.badMsgId))
-            }
-            is NewSessionCreatedObject -> return // We don't care about new sessions, AFAIK
-            is MsgContainerObject -> {
-                // Recurse the container
-                message.messages.sortedBy { it.seqno }.forEach { unpackMessage(it, msgId) }
-            }
-            is RpcResultObject -> {
-                incomingMessages.send(MessageUnpackActionReturn(message.reqMsgId, handleMaybeGzipped(message.result)))
-            }
-            is PongObject -> incomingMessages.send(MessageUnpackActionReturn(message.msgId, message))
-            is BadMsgNotificationObject -> {
-                Napier.e("Bad msg ${message.badMsgId}", tag = tag)
-                TODO("implement")
-            }
-            is MsgDetailedInfoObject -> {
-                Napier.e("Detailed msg info", tag = tag)
-                TODO("implement")
-            }
-            is MsgNewDetailedInfoObject -> {
-                Napier.e("New detailed msg info", tag = tag)
-                TODO("implement")
-            }
-            is MsgsAckObject -> {
-                message.msgIds.forEach {
-                    //incomingMessages.send(MessageUnpackActionReturn(it, null))
+        try {
+            println("msg = $message")
+            if (message is MessageObject)
+                return unpackMessage(message.body, message.msgId)
+            else
+                msgId!!
+            when (message) {
+                is ObjectType -> {
+                    unpackMessage(handleMaybeGzipped(message), msgId)
+                }
+                is BadServerSaltObject -> {
+                    // Fix the salt and retry the message
+                    Napier.d("Bad server salt, corrected to ${message.newServerSalt}", tag = tag)
+                    state.salt = message.newServerSalt.asTlObject().toTlRepr().toByteArray()
+                    incomingMessages.send(MessageUnpackActionRetry(message.badMsgId))
+                }
+                is NewSessionCreatedObject -> return // We don't care about new sessions, AFAIK
+                is MsgContainerObject -> {
+                    // Recurse the container
+                    message.messages.sortedBy { it.seqno }.forEach { unpackMessage(it, msgId) }
+                }
+                is RpcResultObject -> {
+                    incomingMessages.send(
+                        MessageUnpackActionReturn(
+                            message.reqMsgId,
+                            handleMaybeGzipped(message.result)
+                        )
+                    )
+                }
+                is PongObject -> incomingMessages.send(MessageUnpackActionReturn(message.msgId, message))
+                is BadMsgNotificationObject -> {
+                    Napier.e("Bad msg ${message.badMsgId}", tag = tag)
+                    TODO("implement")
+                }
+                is MsgDetailedInfoObject -> {
+                    Napier.e("Detailed msg info", tag = tag)
+                    TODO("implement")
+                }
+                is MsgNewDetailedInfoObject -> {
+                    Napier.e("New detailed msg info", tag = tag)
+                    TODO("implement")
+                }
+                is MsgsAckObject -> {
+                    message.msgIds.forEach {
+                        //incomingMessages.send(MessageUnpackActionReturn(it, null))
+                    }
+                }
+                is FutureSaltsObject -> {
+                    // TODO store and handle future salts
+                }
+                is MsgsStateReqObject -> {
+                    // TODO actually store some data so we can do retries properly
+                    connection.send(
+                        encoder.wrapAndEncode(
+                            MsgsStateInfoObject(
+                                msgId,
+                                ByteArray(message.msgIds.size) { 1 })
+                        )
+                    )
                 }
             }
-            is FutureSaltsObject -> {
-                // TODO store and handle future salts
-            }
-            is MsgsStateReqObject -> {
-                // TODO actually store some data so we can do retries properly
-                connection.send(encoder.wrapAndEncode(MsgsStateInfoObject(msgId, ByteArray(message.msgIds.size) { 1 })))
-            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Napier.e("Dropped message due to exception", e, tag = tag)
+
         }
     }
 
@@ -115,7 +137,7 @@ class MessagePackerUnpacker(val connection: Connection, val encoder: EncryptedMT
                 message.innerObject
             }
             is GzipPackedObject -> {
-                error("NI:GZIP")
+                handleMaybeGzipped(ObjectObject.fromTlRepr(GZIPImpl.decompress(message.packedData).toIntArray())!!.second)
             }
             else -> error("Unexpected ObjectType")
         }

@@ -137,7 +137,7 @@ class NormalKtWriter(output: (String) -> Unit, private val entry: TLEntry, packa
         write("var count = 0")
         write("while (count++ < size) {", 1)
         write("@Suppress(\"UNCHECKED_CAST\")")
-        write("tmp = (generic ?: TlMappings.CONSTRUCTORS[data[off]] as TLConstructor<G>).fromTlRepr(data.sliceArray(off until data.size), generic == null)!!")
+        write("tmp = (generic ?: TlMappings.CONSTRUCTORS[data[off]] as TLConstructor<G>).fromTlRepr(data.sliceArray(off until data.size), generic != null)!!")
         write("off += tmp.first")
         write("ret += tmp.second")
         writeDeclEnd()
@@ -242,7 +242,7 @@ class NormalKtWriter(output: (String) -> Unit, private val entry: TLEntry, packa
         val params = (entry.params.mapNotNull {
             if (it.type.first() == '!') {
                 genericType = it.type.substring(1)
-                generic = "<$genericType : TLObject<*>>"
+                generic = "<R: TLObject<*>, $genericType : TLMethod<R>>"
                 return@mapNotNull "val ${it.name}: $genericType"
             }
             fixType(it.type)?.let { type ->
@@ -257,7 +257,7 @@ class NormalKtWriter(output: (String) -> Unit, private val entry: TLEntry, packa
             if (entry.type.startsWith("Vector<")) {
                 "TLMethod<$fixedType>"
             } else {
-                if (entry.type == genericType) "TLMethod<$genericType>" else
+                if (entry.type == genericType) "TLMethod<R>" else
                     "TLMethod<$fixedType>"
             }
         }
@@ -301,8 +301,8 @@ class NormalKtWriter(output: (String) -> Unit, private val entry: TLEntry, packa
             val close = if (firstChar.toLowerCase() != firstChar) ">(null)" else ")"
             "VectorObject.VectorConstructor" +
                     "$open${fixNamespace(formatType(entry.type.split("<", ">")[1]))}$close"
-            } else {
-            "TlMappings.GenericConstructor<${if (entry.type == genericType) genericType else fixNamespace(formatType(entry.type))}>()"
+        } else {
+            "TlMappings.GenericConstructor<${if (entry.type == genericType) "R" else fixNamespace(formatType(entry.type))}>()"
         })
     }
     private fun writeCompanionStart() = write("companion object : TLConstructor<$tlName$requestExtension> {", 1)

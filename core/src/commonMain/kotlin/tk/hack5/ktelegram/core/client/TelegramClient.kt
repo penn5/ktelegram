@@ -22,7 +22,6 @@ import com.soywiz.krypto.SecureRandom
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import tk.hack5.ktelegram.core.auth.authenticate
 import tk.hack5.ktelegram.core.connection.Connection
@@ -72,7 +71,7 @@ open class TelegramClientImpl(override val apiId: String, override val apiHash: 
         plaintextEncoder: MTProtoEncoder,
         encryptedEncoderConstructor: (MTProtoState) -> EncryptedMTProtoEncoder,
         rsaEncoder: RSAEncoder
-    ) = coroutineScope {
+    ) {
         connection("149.154.167.51", 80).let {
             this@TelegramClientImpl.connection = it
             it.connect()
@@ -84,30 +83,25 @@ open class TelegramClientImpl(override val apiId: String, override val apiHash: 
             GlobalScope.launch {
                 startRecvLoop()
             }
-            launch {
-                delay(1000)
-                sendWrapped(Help_GetConfigRequest(), encoder!!)
-            }
-            sendWrapped(
-                InvokeWithLayerRequest(
-                    105,
-                    InitConnectionRequest(
-                        apiId.toInt(),
-                        "urmom",
-                        "1.2.3",
-                        "1.2.3",
-                        "en",
-                        "",
-                        "en",
-                        null,
-                        Help_GetConfigRequest()
-                    )
-                ), encoder!!
+            println("NEAREST DC IS ${sendWrapped(Help_GetNearestDcRequest(), encoder!!)}")
+            println(
+                "config is " + sendWrapped(
+                    InvokeWithLayerRequest(
+                        108,
+                        InitConnectionRequest(
+                            apiId.toInt(),
+                            "urmom",
+                            "1.2.3",
+                            "1.2.3",
+                            "en",
+                            "",
+                            "en",
+                            null,
+                            Help_GetConfigRequest()
+                        )
+                    ), encoder!!
+                )
             )
-            //sendWrapped(Help_GetConfigRequest(), encoder!!)
-//            sendWrapped(InvokeWithLayerRequest(100, InitConnectionRequest(apiId.toInt(), apiHash, "urmom", "1.2.3", "en", "", "en", null, Help_GetConfigRequest())), encoder!!)
-//            sendWrapped(InvokeWithLayerRequest(105, Help_GetConfigRequest()), encoder!!)
-            Unit
         }
     }
 
