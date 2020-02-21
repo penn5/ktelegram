@@ -1,5 +1,5 @@
 /*
- *     KTelegram (Telegram MTProto client library)
+ *     TeleKat (Telegram MTProto client library)
  *     Copyright (C) 2020 Hackintosh Five
  *
  *     This program is free software: you can redistribute it and/or modify
@@ -16,6 +16,8 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-rootProject.name = "ktelegram"
+rootProject.name = "telekat"
+enableFeaturePreview("GRADLE_METADATA")
 include("generator")
 include("core")
+include("api")

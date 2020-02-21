@@ -1,5 +1,5 @@
 /*
- *     KTelegram (Telegram MTProto client library)
+ *     TeleKat (Telegram MTProto client library)
  *     Copyright (C) 2020 Hackintosh Five
  *
  *     This program is free software: you can redistribute it and/or modify
@@ -26,7 +26,7 @@ plugins {
     kotlin("multiplatform") version "1.3.61"
 }
 
-group = "tk.hack5.ktelegram"
+group = "tk.hack5.telekat"
 version = "0.0.1-SNAPSHOT"
 
 repositories {

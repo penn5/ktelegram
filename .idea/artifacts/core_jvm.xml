@@ -2,7 +2,7 @@
   <artifact type="jar" name="core-jvm">
     <output-path>$PROJECT_DIR$/core/build/libs</output-path>
     <root id="archive" name="core-jvm.jar">
-      <element id="module-output" name="ktelegram.core.jvmMain" />
+      <element id="module-output" name="telekat.core.jvmMain" />
     </root>
   </artifact>
 </component>

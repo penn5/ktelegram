@@ -1,5 +1,5 @@
 /*
- *     KTelegram (Telegram MTProto client library)
+ *     TeleKat (Telegram MTProto client library)
  *     Copyright (C) 2020 Hackintosh Five
  *
  *     This program is free software: you can redistribute it and/or modify
@@ -21,6 +21,7 @@ val serializationVersion = "0.14.0"
 plugins {
     kotlin("multiplatform")
     id("org.jetbrains.kotlin.plugin.serialization") version "1.3.60"
+    application
 }
 
 repositories {
@@ -55,4 +56,28 @@ kotlin {
             dependsOn(commonTest)
         }
     }
+}
+
+tasks {
+    getByName<Delete>("clean") {
+        delete.add("../core/generated")
+    }
+    getByName<org.gradle.jvm.tasks.Jar>("jar") {
+        manifest {
+            attributes["Main-Class"] = "cz.sazel.hellokotlin.MainKt"
+        }
+    }
+    getByName<JavaExec>("run") {
+        dependsOn("jvmMainClasses")
+        inputs.dir("resources")
+            .withPropertyName("inputSchema")
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+        outputs.dir("../core/generated")
+        classpath =
+            kotlin.jvm().compilations["main"].runtimeDependencyFiles + sourceSets["main"].runtimeClasspath + files("build/classes/kotlin/jvm/main")
+    }
+}
+
+application {
+    mainClassName = "tk.hack5.telekat.generator.MainKt"
 }

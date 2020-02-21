@@ -1,5 +1,5 @@
 /*
- *     KTelegram (Telegram MTProto client library)
+ *     TeleKat (Telegram MTProto client library)
  *     Copyright (C) 2020 Hackintosh Five
  *
  *     This program is free software: you can redistribute it and/or modify
@@ -19,7 +19,12 @@
 plugins {
     kotlin("multiplatform")
     id("org.jetbrains.kotlin.plugin.serialization") version "1.3.60"
+    id("org.jetbrains.dokka") version "0.10.0"
+    `maven-publish`
 }
+
+group = "tk.hack5.telekat"
+version = "0.0.1-SNAPSHOT"
 
 repositories {
     mavenCentral()
@@ -27,6 +32,7 @@ repositories {
     maven(url = "https://jitpack.io")
 }
 
+val coroutinesVersion = "1.3.3"
 val napierVersion = "1.1.0"
 val ktorVersion = "1.2.6"
 val kotlinxIoVersion = "0.1.16"
@@ -44,14 +50,13 @@ kotlin {
             kotlin.srcDir("generated/commonMain")
             dependencies {
                 implementation(kotlin("stdlib-common"))
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core-common:1.3.3")
-                implementation("com.github.aakira:napier:$napierVersion")
-                implementation("io.github.gciatto:kt-math-metadata:$ktMathVersion")
+                api("org.jetbrains.kotlinx:kotlinx-coroutines-core-common:$coroutinesVersion")
+                api("com.github.aakira:napier:$napierVersion")
+                api("io.github.gciatto:kt-math-metadata:$ktMathVersion")
                 implementation("com.soywiz.korlibs.krypto:krypto:$kryptoVersion")
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-io:$kotlinxIoVersion")
-                implementation("org.jetbrains.kotlinx:kotlinx-serialization-runtime-common:$serializationVersion")
+                api("org.jetbrains.kotlinx:kotlinx-serialization-runtime-common:$serializationVersion")
                 implementation("com.soywiz.korlibs.klock:klock:$klockVersion")
-
             }
         }
         val commonTest by getting {
@@ -63,13 +68,13 @@ kotlin {
         jvm().compilations["main"].defaultSourceSet {
             dependencies {
                 implementation(kotlin("stdlib-jdk8"))
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.3.3")
-                implementation("com.github.aakira:napier-jvm:$napierVersion")
+                api("org.jetbrains.kotlinx:kotlinx-coroutines-core:$coroutinesVersion")
+                api("com.github.aakira:napier-jvm:$napierVersion")
                 implementation("io.ktor:ktor-network:$ktorVersion")
-                implementation("io.github.gciatto:kt-math-jvm:$ktMathVersion")
+                api("io.github.gciatto:kt-math-jvm:$ktMathVersion")
                 implementation("com.soywiz.korlibs.krypto:krypto-jvm:$kryptoVersion")
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-io-jvm:$kotlinxIoVersion")
-                implementation("org.jetbrains.kotlinx:kotlinx-serialization-runtime:$serializationVersion")
+                api("org.jetbrains.kotlinx:kotlinx-coroutines-io-jvm:$kotlinxIoVersion")
+                api("org.jetbrains.kotlinx:kotlinx-serialization-runtime:$serializationVersion")
                 implementation("com.soywiz.korlibs.klock:klock-jvm:$klockVersion")
                 implementation("org.bouncycastle:bcprov-jdk15on:$bouncyCastleVersion")
                 implementation("org.bouncycastle:bcpkix-jdk15on:$bouncyCastleVersion")
@@ -86,8 +91,24 @@ kotlin {
     }
 }
 
+tasks.filter { it.name.startsWith("compileKotlin") }.forEach {
+    it.dependsOn(project(":generator").getTasksByName("run", false).first())
+}
 
-tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().all {
-    kotlinOptions.freeCompilerArgs += listOf("-Xuse-experimental=kotlin.Experimental")
-    kotlinOptions.freeCompilerArgs += listOf("-Xuse-experimental=kotlin.UseExperimental")
+tasks.dokka {
+    outputFormat = "html"
+    outputDirectory = "$buildDir/javadoc"
+}
+
+val dokkaJar by tasks.creating(Jar::class) {
+    group = JavaBasePlugin.DOCUMENTATION_GROUP
+    description = "Assembles Kotlin docs with Dokka"
+    classifier = "javadoc"
+    from(tasks.dokka)
+}
+
+publishing {
+    repositories {
+        mavenLocal()
+    }
 }
