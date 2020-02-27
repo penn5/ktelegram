@@ -34,8 +34,9 @@ class BytesObject(private val bytes: ByteArray, override val bare: Boolean) :
 
     override val native = bytes
 
-    @ExperimentalUnsignedTypes
-    override val _id = Companion._id
+    override val _id = id
+
+    override val fields by lazy { mapOf<String, TLObject<*>>() }
 
     companion object :
         TLConstructor<BytesObject> {
@@ -56,8 +57,7 @@ class BytesObject(private val bytes: ByteArray, override val bare: Boolean) :
             )
         }
 
-        @ExperimentalUnsignedTypes
-        override val _id: UInt? = null
+        override val id: Int? = null
     }
 }
 

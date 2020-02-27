@@ -46,7 +46,7 @@ open class EncryptedMTProtoEncoder(
         return Pair(key, iv)
     }
 
-    override fun encode(data: ByteArray): ByteArray {
+    override suspend fun encode(data: ByteArray): ByteArray {
         val internalHeader =
             state.salt + state.sessionId
         val paddingLength = (-internalHeader.size - data.size - 12) % 16 + 12
@@ -57,8 +57,8 @@ open class EncryptedMTProtoEncoder(
         return authKeyId + msgKey + encrypted
     }
 
-    override fun encodeMessage(data: MessageObject): ByteArray = encode(data.toTlRepr().toByteArray())
-    override fun wrapAndEncode(data: TLObject<*>, isContentRelated: Boolean): Pair<ByteArray, Long> {
+    override suspend fun encodeMessage(data: MessageObject): ByteArray = encode(data.toTlRepr().toByteArray())
+    override suspend fun wrapAndEncode(data: TLObject<*>, isContentRelated: Boolean): Pair<ByteArray, Long> {
         val seq = (if (isContentRelated) state.seq++ else state.seq) * 2 + if (isContentRelated) 1 else 0
         val encoded = data.toTlRepr().toByteArray()
         val msgId = state.getMsgId()
@@ -72,16 +72,15 @@ open class EncryptedMTProtoEncoder(
         val aesKey = calcKey(msgKey, false)
         val decrypted =
             aesConstructor(AESMode.DECRYPT, aesKey.first).doIGE(aesKey.second, data.sliceArray(24 until data.size))
-        println(decrypted.contentToString())
         require(
             (state.authKey!!.key.sliceArray(96 until 128) + decrypted).sha256().sliceArray(8 until 24).contentEquals(
                 msgKey
             )
         ) { "Invalid msgKey" }
+        // TODO implement future salt support so we can verify its a valid salt, and handle it right if its wrong
         require(decrypted.sliceArray(0 until 8).contentEquals(state.salt) || state.salt.all { it == 0.toByte() }) { "Invalid salt" }
         require(decrypted.sliceArray(8 until 16).contentEquals(state.sessionId)) { "Invalid sessionId" }
         // We cannot validate the msgId yet if there's a container because the container contents will be lower
-        println(decrypted.slice(16 until decrypted.size))
         return decrypted.sliceArray(16 until decrypted.size)
     }
 

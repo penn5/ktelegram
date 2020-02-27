@@ -28,10 +28,13 @@ abstract class Session<T : Session<T>> {
     abstract val ipAddress: String
     abstract val port: Int
     abstract val state: MTProtoStateImpl?
-    abstract val entities: Map<Long, Long>
+    abstract val entities: Map<String, Map<Long, Long>>
+    abstract val updates: UpdateState?
 
     abstract fun setDc(dcId: Int, ipAddress: String, port: Int): T
     abstract fun setState(state: MTProtoStateImpl?): T
+    abstract fun addEntities(newEntities: Map<String, Map<Long, Long>>)
+    abstract fun setUpdateState(newUpdateState: UpdateState): T
 
     abstract suspend fun save()
 }
@@ -41,18 +44,32 @@ data class MemorySession(
     override val ipAddress: String = "149.154.167.50",
     override val port: Int = 443,
     override var state: MTProtoStateImpl? = null,
-    override val entities: MutableMap<Long, Long> = mutableMapOf()
+    override val entities: MutableMap<String, MutableMap<Long, Long>> = mutableMapOf(),
+    override val updates: UpdateState? = null
 ) : Session<MemorySession>() {
     override fun setDc(dcId: Int, ipAddress: String, port: Int): MemorySession =
         copy(dcId = dcId, ipAddress = ipAddress, port = port)
 
     override fun setState(state: MTProtoStateImpl?): MemorySession = copy(state = state)
 
+    override fun addEntities(newEntities: Map<String, Map<Long, Long>>) {
+        newEntities.forEach { entities.getOrPut(it.key, { mutableMapOf() }).putAll(it.value) }
+    }
+
+    override fun setUpdateState(newUpdateState: UpdateState) = copy(updates = newUpdateState)
+
     override suspend fun save() {}
 
     companion object {
         fun from(session: Session<*>): MemorySession = session.run {
-            MemorySession(dcId, ipAddress, port, state, entities.toMutableMap())
+            MemorySession(
+                dcId,
+                ipAddress,
+                port,
+                state,
+                entities.mapValues { it.value.toMutableMap() }.toMutableMap(),
+                session.updates
+            )
         }
     }
 }
@@ -64,12 +81,19 @@ data class JsonSession(
     override val ipAddress: String = "149.154.167.50",
     override val port: Int = 443,
     override var state: MTProtoStateImpl? = null,
-    override val entities: MutableMap<Long, Long> = mutableMapOf()
+    override val entities: MutableMap<String, MutableMap<Long, Long>> = mutableMapOf(),
+    override val updates: UpdateState? = null
 ) : Session<JsonSession>() {
     override fun setDc(dcId: Int, ipAddress: String, port: Int): JsonSession =
         copy(dcId = dcId, ipAddress = ipAddress, port = port)
 
     override fun setState(state: MTProtoStateImpl?): JsonSession = copy(state = state)
+
+    override fun addEntities(newEntities: Map<String, Map<Long, Long>>) {
+        newEntities.forEach { entities.getOrPut(it.key, { mutableMapOf() }).putAll(it.value) }
+    }
+
+    override fun setUpdateState(newUpdateState: UpdateState) = copy(updates = newUpdateState)
 
     override suspend fun save() {
         output?.let {
@@ -90,7 +114,15 @@ data class JsonSession(
         }
 
         fun from(session: Session<*>, output: ((String) -> Unit)? = null) = session.run {
-            JsonSession(output, dcId, ipAddress, port, state, entities.toMutableMap())
+            JsonSession(
+                output,
+                dcId,
+                ipAddress,
+                port,
+                state,
+                entities.mapValues { it.value.toMutableMap() }.toMutableMap(),
+                session.updates
+            )
         }
     }
 }

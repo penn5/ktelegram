@@ -16,15 +16,14 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+@file:Suppress("MemberVisibilityCanBePrivate")
+
 package tk.hack5.telekat.core.client
 
 import com.github.aakira.napier.Napier
 import com.soywiz.krypto.SecureRandom
-import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import tk.hack5.telekat.core.auth.authenticate
 import tk.hack5.telekat.core.connection.Connection
 import tk.hack5.telekat.core.connection.TcpFullConnection
@@ -37,11 +36,11 @@ import tk.hack5.telekat.core.errors.RedirectedError
 import tk.hack5.telekat.core.errors.RpcError
 import tk.hack5.telekat.core.mtproto.RpcErrorObject
 import tk.hack5.telekat.core.packer.MessagePackerUnpacker
-import tk.hack5.telekat.core.state.MTProtoState
-import tk.hack5.telekat.core.state.MTProtoStateImpl
-import tk.hack5.telekat.core.state.MemorySession
-import tk.hack5.telekat.core.state.Session
+import tk.hack5.telekat.core.state.*
 import tk.hack5.telekat.core.tl.*
+import tk.hack5.telekat.core.updates.ObjectType
+import tk.hack5.telekat.core.updates.UpdateHandler
+import tk.hack5.telekat.core.updates.UpdateHandlerImpl
 
 private const val tag = "TelegramClient"
 
@@ -57,13 +56,21 @@ abstract class TelegramClient {
 
     abstract suspend operator fun <N, R : TLObject<N>> invoke(request: TLMethod<R>): N
     abstract suspend fun start(
-        phoneNumber: () -> String = { "9996627244" },
+        phoneNumber: () -> String,
         signUpConsent: (Help_TermsOfServiceObject?) -> Pair<String, String>? = { null },
-        phoneCode: () -> String = { "22222" },
-        password: () -> String = { "" }
+        phoneCode: () -> String,
+        password: () -> String
     ): UserType
 
     abstract suspend fun disconnect()
+
+    abstract suspend fun getMe(): UserObject
+    abstract suspend fun getInputMe(): InputPeerUserObject
+
+    abstract fun getAccessHash(constructor: ObjectType, peerId: Int): Long?
+    abstract fun getAccessHash(constructor: ObjectType, peerId: Long): Long?
+    abstract val updateCallbacks: List<suspend (UpdateType) -> Unit>
+    abstract suspend fun catchUp()
 }
 
 open class TelegramClientImpl(
@@ -86,9 +93,16 @@ open class TelegramClientImpl(
     protected var unpacker: MessagePackerUnpacker? = null
     protected var serverConfig: ConfigObject? = null
     protected val updatesChannel = Channel<UpdatesType>(Channel.UNLIMITED)
+    protected lateinit var inputUserSelf: InputPeerUserObject
+    protected var updatesHandler: UpdateHandler? = null
+    protected val activeTasks = mutableListOf<Job>()
 
+    override val updateCallbacks = mutableListOf<suspend (UpdateType) -> Unit>()
 
     override suspend fun connect() {
+        session.updates?.let {
+            updatesHandler = UpdateHandlerImpl(it, this)
+        }
         connectionConstructor(session.ipAddress, session.port).let {
             it.connect()
             this@TelegramClientImpl.connection = it
@@ -108,7 +122,7 @@ open class TelegramClientImpl(
                 unpacker = MessagePackerUnpacker(it, encoder!!, session.state!!, updatesChannel)
             }
 
-            GlobalScope.launch {
+            activeTasks += GlobalScope.launch {
                 startRecvLoop()
             }
 
@@ -133,12 +147,39 @@ open class TelegramClientImpl(
     }
 
     override suspend fun disconnect() {
+        activeTasks.forEach {
+            it.cancel()
+        }
+        activeTasks.forEach {
+            it.join()
+        }
+        activeTasks.clear()
         session.save()
         connection?.disconnect()
         connection = null
     }
 
     override suspend fun start(
+        phoneNumber: () -> String,
+        signUpConsent: (Help_TermsOfServiceObject?) -> Pair<String, String>?,
+        phoneCode: () -> String,
+        password: () -> String
+    ): UserType {
+        val ret = logIn(phoneNumber, signUpConsent, phoneCode, password)
+        val state = (this(Updates_GetStateRequest()) as Updates_StateObject)
+        val updatesState = UpdateState(state.seq, state.date, state.qts, mutableMapOf(null to state.pts))
+        session = session.setUpdateState(updatesState)
+        updatesHandler = UpdateHandlerImpl(updatesState, this)
+        activeTasks += GlobalScope.launch {
+            while (true) {
+                val update = updatesHandler!!.updates.receive()
+                updateCallbacks.forEach { it(update) }
+            }
+        }
+        return ret
+    }
+
+    protected suspend fun logIn(
         phoneNumber: () -> String,
         signUpConsent: (Help_TermsOfServiceObject?) -> Pair<String, String>?,
         phoneCode: () -> String,
@@ -173,20 +214,6 @@ open class TelegramClientImpl(
         val auth = try {
             this(Auth_SignInRequest(phone, sentCode.phoneCodeHash, phoneCode()))
         } catch (e: BadRequestError.SessionPasswordNeededError) {
-            /*
-            val passwd = password()
-            val remotePassword = this(Account_GetPasswordRequest()) as Account_PasswordObject
-            when (remotePassword.currentAlgo) {
-                is PasswordKdfAlgoSHA256SHA256PBKDF2HMACSHA512iter100000SHA256ModPowObject -> {
-                    // TODO https://github.com/korlibs/krypto/issues/12
-                    val g = remotePassword.currentAlgo.g.toByteArray(256)
-                    val p = remotePassword.currentAlgo.p.pad(256)
-                    val k = (p + g).sha256()
-                    val a = getSecureNonce()
-                    val u = ()
-                }
-                else -> error("Invalid password algo")
-            }*/
             // TODO 2fa
             throw e
         }
@@ -210,7 +237,26 @@ open class TelegramClientImpl(
         }
     }
 
-    suspend fun getMe() = this(Users_GetUsersRequest(listOf(InputUserSelfObject()))).single()
+    override suspend fun getMe(): UserObject {
+        return (this(Users_GetUsersRequest(listOf(InputUserSelfObject()))).single() as UserObject).also {
+            inputUserSelf = InputPeerUserObject(it.id, it.accessHash!!)
+        }
+    }
+
+    override suspend fun getInputMe(): InputPeerUserObject {
+        if (::inputUserSelf.isInitialized)
+            return inputUserSelf
+        getMe()
+        return inputUserSelf
+    }
+
+    override fun getAccessHash(constructor: ObjectType, peerId: Int): Long? =
+        getAccessHash(constructor, peerId.toLong())
+
+    override fun getAccessHash(constructor: ObjectType, peerId: Long): Long? =
+        session.entities[constructor.name]?.get(peerId)
+
+    override suspend fun catchUp() = updatesHandler!!.catchUp()
 
     protected suspend fun startRecvLoop() = coroutineScope {
         val byteChannel = Channel<ByteArray>()
@@ -220,12 +266,20 @@ open class TelegramClientImpl(
         launch {
             unpacker!!.pump(byteChannel)
         }
+        launch {
+            while (true)
+                unpacker!!.updatesChannel.receive().let {
+                    updatesHandler?.getEntities(it)?.let { entities ->
+                        session.addEntities(entities)
+                    }
+                    updatesHandler?.handleUpdates(it)
+                }
+        }
     }
 
     override suspend fun <R : TLObject<*>> send(request: TLMethod<R>, encoder: MTProtoEncoder): R {
         connection!!.send(encoder.encode(request.toTlRepr().toByteArray()))
         val response = encoder.decode(connection!!.recv()).toIntArray()
-        println(response.contentToString())
         return request.constructor.fromTlRepr(response)!!.second
     }
 
@@ -237,13 +291,25 @@ open class TelegramClientImpl(
         return ret as R
     }
 
-    override suspend operator fun <N, R : TLObject<N>> invoke(request: TLMethod<R>): N {
-        return try {
-            sendWrapped(request, encoder!!).native
+    suspend fun <R : TLObject<*>> sendAndUnpack(request: TLMethod<R>): R {
+        val ret: R = try {
+            sendWrapped(request, encoder!!)
         } catch (e: BadRequestError.FloodWaitError) {
             if (e.seconds > maxFloodWait) throw e
             delay(e.seconds.toLong())
-            this(request)
+            sendAndUnpack(request)
+        }
+        updatesHandler?.getEntities(ret)?.let {
+            session.addEntities(it)
+        }
+        return ret
+    }
+
+    override suspend operator fun <N, R : TLObject<N>> invoke(request: TLMethod<R>): N {
+        try {
+            return sendAndUnpack(request).native
+        } catch (e: Throwable) {
+            throw e // Needed to preserve stack traces on buggy coroutines impl
         }
     }
 }

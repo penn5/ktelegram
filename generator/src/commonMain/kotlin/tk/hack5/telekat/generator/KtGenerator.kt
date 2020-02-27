@@ -66,8 +66,7 @@ class MapKtWriter(output: (String) -> Unit, private val data: TLData, packageNam
         // Vectors need special serialization due to the generics, so exclude
         // them from here (they don't implement TLConstructor anyway)
         write("val CONSTRUCTORS = mapOf(" + data.constructors.joinToString {
-            "0x${it.id.toString(16)}L.toInt() to " +
-                    "${fixNamespace(it.name).substringBeforeLast(" ").capitalize()}Object.Companion"
+            "${it.id} to ${fixNamespace(it.name).substringBeforeLast(" ").capitalize()}Object.Companion"
         } + ")")
         write()
         write("class GenericConstructor<T : TLObject<*>> : TLConstructor<T> {", 1)
@@ -76,8 +75,7 @@ class MapKtWriter(output: (String) -> Unit, private val data: TLData, packageNam
         write("return (CONSTRUCTORS[data[0]] as TLConstructor<T>).fromTlRepr(data, false)")
         writeDeclEnd()
         write()
-        write("@ExperimentalUnsignedTypes")
-        write("override val _id: UInt? = null")
+        write("override val id: Int? = null")
         writeDeclEnd()
         writeDeclEnd()
     }
@@ -126,8 +124,9 @@ class NormalKtWriter(output: (String) -> Unit, private val entry: TLEntry, packa
         write()
         write("override val native: List<E> = list.toList()")
         write()
-        write("@ExperimentalUnsignedTypes")
-        write("override val _id get() = 0x${entry.id.toString(16)}U")
+        write("override val _id = ${entry.id}")
+        write()
+        write("override val fields by lazy { list.mapIndexed { index, value -> index.toString() to value }.toMap() }")
         write()
         write("companion object : TLConstructor<VectorObject<*>> {", 1)
         write("// Entirely generic constructor; can return any type of VectorObject without generics-safety")
@@ -139,7 +138,7 @@ class NormalKtWriter(output: (String) -> Unit, private val entry: TLEntry, packa
             "fun <G : TLObject<*>>fromTlRepr(data: IntArray, bare: Boolean, generic: TLConstructor<G>? = null): Pair<Int, VectorObject<G>>? {",
             1
         )
-        write("if (!bare && data[0] != _id.toInt()) return null")
+        write("if (!bare && data[0] != id) return null")
         write("var off = if (bare) 0 else 1")
         write("if (data.size <= off) return Pair(off, VectorObject(listOf(), bare))")
         write("val size = data[off++]")
@@ -155,16 +154,14 @@ class NormalKtWriter(output: (String) -> Unit, private val entry: TLEntry, packa
         write("return Pair(off, VectorObject(ret, bare))")
         writeDeclEnd()
         write()
-        write("@ExperimentalUnsignedTypes")
-        write("override val _id get() = 0x${entry.id.toString(16)}U")
+        write("override val id = ${entry.id}")
         writeDeclEnd()
         write()
         write("class VectorConstructor<G : TLObject<*>>(val generic: TLConstructor<G>?) : TLConstructor<VectorObject<G>> {", 1)
         write("@ExperimentalUnsignedTypes")
         write("override fun _fromTlRepr(data: IntArray): Pair<Int, VectorObject<G>>? = fromTlRepr(data, true, generic)")
         write()
-        write("@ExperimentalUnsignedTypes")
-        write("override val _id: UInt? get() = VectorObject._id")
+        write("override val id = VectorObject.id")
         writeDeclEnd()
         writeDeclEnd()
     }
@@ -179,12 +176,14 @@ class NormalKtWriter(output: (String) -> Unit, private val entry: TLEntry, packa
         writeDeclEnd()
         write()
         writeNativeGetter()
+        writeFields()
+        write()
+        writeIdGetter(false)
         if (entry.entryType == EntryType.CONSTRUCTOR) {
-            writeIdGetter()
             write()
             writeCompanionStart()
+            writeIdGetter(true)
         }
-        writeId()
         write()
         if (entry.entryType == EntryType.CONSTRUCTOR) {
             writeFromTlReprDef()
@@ -205,6 +204,7 @@ class NormalKtWriter(output: (String) -> Unit, private val entry: TLEntry, packa
 
     fun writeImports() {
         if (isSpecial()) return
+        write("import tk.hack5.telekat.core.tl.TLObject")
         when (entry.entryType) {
             EntryType.CONSTRUCTOR -> {
                 write("import tk.hack5.telekat.core.tl.TLConstructor")
@@ -233,13 +233,14 @@ class NormalKtWriter(output: (String) -> Unit, private val entry: TLEntry, packa
                 if (type in PRIMITIVE_TYPES)
                     write("import tk.hack5.telekat.core.tl.${type.capitalize()}Object")
                 entry.params.asSequence().map { it.type.toLowerCase().split("?", "<", ">") }.flatten().map {
-                    when {
-                        it == "int128" || it == "int256" -> listOf(
+                    when (it) {
+                        "int128", "int256" -> listOf(
                             "import tk.hack5.telekat.core.tl.asTlObject${it.takeLast(3)}",
                             "import org.gciatto.kt.math.BigInteger"
                         )
                         else -> null
-                    } }.filterNotNull().flatten().distinct().forEach { write(it) }
+                    }
+                }.filterNotNull().flatten().distinct().forEach { write(it) }
             }
         }
         if (entry.params.any { it.type.split("?").last().toLowerCase() in PRIMITIVE_TYPES + Pair("bool", "") })
@@ -287,27 +288,38 @@ class NormalKtWriter(output: (String) -> Unit, private val entry: TLEntry, packa
         val params = entry.params.mapNotNull { fixSerialization(it.name, it.type) }.joinToString()
         write("return intArrayOf($params)")
     }
+
     private fun writeNativeGetter() {
-        write("override val native = " + when (entry.name) {
-            "true", "boolTrue" -> "true"
-            "boolFalse" -> "false"
-            else -> "this"
-        })
+        write(
+            "override val native = " + when (entry.name) {
+                "true", "boolTrue" -> "true"
+                "boolFalse" -> "false"
+                else -> "this"
+            }
+        )
         write()
     }
-    private fun writeIdGetter() {
-        write("@ExperimentalUnsignedTypes")
-        write("override val _id get() = 0x${entry.id.toString(16)}U")
+
+    private fun writeIdGetter(constructor: Boolean) {
+        write("override val ${if (constructor) "" else "_"}id = ${entry.id}")
     }
+
+    private fun writeFields() {
+        val inner = entry.params.filter { it.type != "#" }
+            .joinToString { "\"${it.name}\" to ${fixToTlObject(it.name, it.type)}" }
+        write("override val fields by lazy { mapOf<String, TLObject<*>?>($inner) }")
+    }
+
     private fun writeConstructor() {
 //        val fixedType = fixNamespace(fixType(entry.type, true)!!)
-        write("override val constructor = " + if (entry.type.startsWith("Vector<")) {
-            val genericConstructor = entry.type.split("<", ">")[1]
-            val firstChar = genericConstructor.substringAfterLast(".").first()
+        write(
+            "override val constructor = " + if (entry.type.startsWith("Vector<")) {
+                val genericConstructor = entry.type.split("<", ">")[1]
+                val firstChar = genericConstructor.substringAfterLast(".").first()
 //            val constructor = if (genericConstructor.first().toLowerCase() != genericConstructor.first()) "null" else fixedType
-            val open = if (firstChar.toLowerCase() != firstChar) "<" else "("
-            val close = if (firstChar.toLowerCase() != firstChar) ">(null)" else ")"
-            "VectorObject.VectorConstructor" +
+                val open = if (firstChar.toLowerCase() != firstChar) "<" else "("
+                val close = if (firstChar.toLowerCase() != firstChar) ">(null)" else ")"
+                "VectorObject.VectorConstructor" +
                     "$open${fixNamespace(formatType(entry.type.split("<", ">")[1]))}$close"
         } else {
             "TlMappings.GenericConstructor<${if (entry.type == genericType) "R" else fixNamespace(formatType(entry.type))}>()"
@@ -334,10 +346,6 @@ class NormalKtWriter(output: (String) -> Unit, private val entry: TLEntry, packa
                     if (it.type.startsWith("Vector<")) ".map { it.native }" else ""
         } + "))")
     }
-    private fun writeId() {
-        write("@ExperimentalUnsignedTypes")
-        write("override val _id get() = 0x${entry.id.toString(16)}U")
-    }
 }
 
 class TypeKtWriter(output: (String) -> Unit, typeName: String, packageName: String) : KtWriter(output, packageName, typeName) {
@@ -353,14 +361,13 @@ class TypeKtWriter(output: (String) -> Unit, typeName: String, packageName: Stri
             write()
             write("override val native = this")
             write()
-            write("@ExperimentalUnsignedTypes")
-            write("override val _id: UInt? = null")
+            write("override val _id: Int? = null")
+            write()
+            write("override val fields by lazy { mapOf(\"innerObject\" to innerObject) }")
             write()
             write("companion object : TLConstructor<ObjectType> {", 1)
-            write("@ExperimentalUnsignedTypes")
-            write("override val _id: UInt? = null")
+            write("override val id: Int? = null")
             write()
-            write("@ExperimentalUnsignedTypes")
             write("override fun _fromTlRepr(data: IntArray): Pair<Int, ObjectType>? {", 1)
             write("val innerObject = (TlMappings.CONSTRUCTORS[data.first()]", 1)
             write("?: error(\"Attempting to deserialize unrecognized datatype\")).fromTlRepr(data)")
@@ -517,11 +524,15 @@ private fun fixSerialization(name: String, type: String): String? {
         return "${name}_flags.toInt()"
     if (type.endsWith("?true"))
         return null
-    val nullability = if ("?" in type)
+    return "*" + fixToTlObject(name, type) + if ("?" in type) "?.toTlRepr() ?: intArrayOf()" else ".toTlRepr()"
+}
+
+private fun fixToTlObject(name: String, type: String): String? {
+    val nullability = if ("?" in type && !type.endsWith("?true"))
         "?"
     else
         ""
-    val intBits = when (type.substringAfterLast("?").substringAfterLast("<").substringBefore(">"))  {
+    val intBits = when (type.substringAfterLast("?").substringAfterLast("<").substringBefore(">")) {
         "int128" -> "128"
         "int256" -> "256"
         else -> ""
@@ -530,7 +541,7 @@ private fun fixSerialization(name: String, type: String): String? {
         type.substringAfterLast("?").startsWith("vector<", true) -> if (type.first() == 'V') "false" else "true"
         else -> ""
     }
-    return "*$name$nullability.asTlObject$intBits($vectorBare)$nullability.toTlRepr()" + if (nullability.isEmpty()) "" else " ?: intArrayOf()"
+    return "$name$nullability.asTlObject$intBits($vectorBare)"
 }
 
 private fun fixDeserialization(name: String, type: String, _internal: Boolean = false): List<Pair<String, Int>> {

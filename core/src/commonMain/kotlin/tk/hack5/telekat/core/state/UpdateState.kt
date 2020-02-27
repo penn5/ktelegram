@@ -16,15 +16,9 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-package tk.hack5.telekat.api
+package tk.hack5.telekat.core.state
 
-import tk.hack5.telekat.core.tl.PeerChannelObject
-import tk.hack5.telekat.core.tl.PeerChatObject
-import tk.hack5.telekat.core.tl.PeerType
-import tk.hack5.telekat.core.tl.PeerUserObject
+import kotlinx.serialization.Serializable
 
-fun PeerType.getId() = when (this) {
-    is PeerUserObject -> userId
-    is PeerChatObject -> chatId
-    is PeerChannelObject -> channelId
-}
+@Serializable
+data class UpdateState(var seq: Int, var date: Int, var qts: Int, val pts: MutableMap<Int?, Int>)

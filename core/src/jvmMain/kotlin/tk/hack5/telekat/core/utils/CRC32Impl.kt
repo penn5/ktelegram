@@ -21,5 +21,5 @@ package tk.hack5.telekat.core.utils
 import java.util.zip.CRC32
 
 actual fun calculateCRC32(data: ByteArray): Int {
-    return CRC32().apply { update(data); println(value) }.value.toInt()
+    return CRC32().apply { update(data) }.value.toInt()
 }

@@ -18,16 +18,24 @@
 
 package tk.hack5.telekat.api
 
+import tk.hack5.telekat.core.client.TelegramClient
 import tk.hack5.telekat.core.tl.*
+import tk.hack5.telekat.core.updates.ObjectType
 
-fun ChannelObject.toInputPeer(): InputPeerChannelObject = InputPeerChannelObject(this.id, this.accessHash!!)
+fun ChannelObject.toInputPeer(): InputPeerChannelObject = InputPeerChannelObject(id, accessHash!!)
+fun PeerChannelObject.toInputPeer(client: TelegramClient): InputPeerChannelObject? {
+    return InputPeerChannelObject(id, client.getAccessHash(ObjectType.CHANNEL, id) ?: return null)
+}
 
-fun ChatObject.toInputPeer(): InputPeerChatObject = InputPeerChatObject(this.id)
-
-fun UserObject.toInputPeer(): InputPeerUserObject = InputPeerUserObject(this.id, this.accessHash!!)
+fun ChatObject.toInputPeer(): InputPeerChatObject = InputPeerChatObject(id)
+fun PeerChatObject.toInputPeer(): InputPeerChatObject = InputPeerChatObject(chatId)
+fun UserObject.toInputPeer(): InputPeerUserObject = InputPeerUserObject(id, accessHash!!)
+fun PeerUserObject.toInputPeer(client: TelegramClient): InputPeerUserObject? {
+    return InputPeerUserObject(id, client.getAccessHash(ObjectType.USER, id) ?: return null)
+}
 
 fun Messages_DialogsType.getInputPeer(dialog: DialogObject): InputPeerType {
-    val id = dialog.peer.getId()
+    val id = dialog.peer.id
     return when (this) {
         is Messages_DialogsObject -> when (dialog.peer) {
             is PeerUserObject -> (users.first { (it as? UserObject)?.id == id } as UserObject).toInputPeer()

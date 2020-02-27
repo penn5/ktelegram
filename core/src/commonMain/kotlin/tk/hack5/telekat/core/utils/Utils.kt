@@ -18,10 +18,8 @@
 
 package tk.hack5.telekat.core.utils
 
-fun ByteArray.pad(size: Int, padding: Byte = 0.toByte()): ByteArray {
-    return when {
-        this.size == size -> this
-        this.size > size -> this.drop(this.size - size).toByteArray()
-        else -> ByteArray(size - this.size) { padding } + this
-    }
+fun ByteArray.pad(size: Int, padding: Byte = 0.toByte()): ByteArray = when {
+    this.size == size -> this
+    this.size > size -> this.drop(this.size - size).toByteArray()
+    else -> ByteArray(size - this.size) { padding } + this
 }

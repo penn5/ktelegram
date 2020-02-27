@@ -22,8 +22,8 @@ import kotlinx.serialization.Decoder
 import kotlinx.serialization.Encoder
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializer
-import kotlinx.serialization.internal.ByteArraySerializer
 import kotlinx.serialization.internal.StringDescriptor
+import kotlinx.serialization.internal.StringSerializer
 import org.gciatto.kt.math.BigInteger
 
 fun BigInteger.asTlObject128(): Int128Object =
@@ -49,13 +49,13 @@ class Int128Object(private val int128: BigInteger, override val bare: Boolean) :
 
     override val native = int128
 
-    @ExperimentalUnsignedTypes
-    override val _id = Companion._id
+    override val _id = id
+
+    override val fields by lazy { mapOf<String, TLObject<*>>() }
 
     companion object :
         TLConstructor<Int128Object> {
-        @ExperimentalUnsignedTypes
-        override val _id: UInt? = null
+        override val id: Int? = null
 
         override fun _fromTlRepr(data: IntArray): Pair<Int, Int128Object>? {
             if (data.size < 4)
@@ -89,13 +89,13 @@ class Int256Object(private val int256: BigInteger, override val bare: Boolean) :
 
     override val native = int256
 
-    @ExperimentalUnsignedTypes
-    override val _id = Companion._id
+    override val _id = id
+
+    override val fields by lazy { mapOf<String, TLObject<*>>() }
 
     companion object :
         TLConstructor<Int128Object> {
-        @ExperimentalUnsignedTypes
-        override val _id: UInt? = null
+        override val id: Int? = null
 
         override fun _fromTlRepr(data: IntArray): Pair<Int, Int128Object>? {
             if (data.size < 8)
@@ -127,10 +127,10 @@ fun BigInteger.toByteArray(size: Int): ByteArray {
 object BigIntegerSerializer : KSerializer<BigInteger> {
     override val descriptor = StringDescriptor
     override fun deserialize(decoder: Decoder): BigInteger {
-        return BigInteger(ByteArraySerializer.deserialize(decoder))
+        return BigInteger(StringSerializer.deserialize(decoder), 16)
     }
 
     override fun serialize(encoder: Encoder, obj: BigInteger) {
-        ByteArraySerializer.serialize(encoder, obj.toByteArray())
+        StringSerializer.serialize(encoder, obj.toString(16))
     }
 }

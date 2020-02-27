@@ -24,14 +24,13 @@ interface TLObject<N> {
     val bare: Boolean
     fun _toTlRepr(): IntArray
     @Suppress("EXPERIMENTAL_API_USAGE") // @UseExperimental is experimental itself
-                                                // and the -Xuse-experimental doesn't work properly
-    fun toTlRepr(): IntArray = if (!bare) intArrayOf(_id?.toInt() ?:
-        error("Boxed serialization not possible on bare types")) + _toTlRepr() else _toTlRepr()
+    // and the -Xuse-experimental doesn't work properly
+    fun toTlRepr(): IntArray = if (!bare) intArrayOf(
+        _id ?: error("Boxed serialization not possible on bare types")
+    ) + _toTlRepr() else _toTlRepr()
+
     fun asTlObject() = this
     val native: N
-
-    @ExperimentalUnsignedTypes
-    val _id: UInt?
     /*
     Sample implementation:
     @ExperimentalUnsignedTypes
@@ -39,6 +38,10 @@ interface TLObject<N> {
         get() = Companion._id
     If you don't use a getter, it crashes with an obscure ClassCastException. No idea why.
      */
+
+    val _id: Int?
+
+    val fields: Map<String, TLObject<*>?>
 }
 
 interface TLConstructor<T : TLObject<*>> {
@@ -47,22 +50,21 @@ interface TLConstructor<T : TLObject<*>> {
                                                 // and the -Xuse-experimental doesn't work properly
     fun fromTlRepr(data: IntArray, bare: Boolean = false): Pair<Int, T>? {
         // the Int is the count of bytes consumed, for Vectors
-        if (!bare && _id != null) {
-            if (data[0] != _id?.toInt())
+        if (!bare && id != null) {
+            if (data[0] != id)
                 return null
             return _fromTlRepr(data.sliceArray(1 until data.size))?.let {
                 Pair(it.first + 1, it.second)
             }
         } else return _fromTlRepr(data)
     }
-    @ExperimentalUnsignedTypes
-    val _id: UInt?
+
+    val id: Int?
 }
 
 interface TLMethod<R : TLObject<*>> :
     TLObject<TLMethod<R>> {
-    @ExperimentalUnsignedTypes
-    override val _id: UInt
+    override val _id: Int
 
     val constructor: TLConstructor<R>
 

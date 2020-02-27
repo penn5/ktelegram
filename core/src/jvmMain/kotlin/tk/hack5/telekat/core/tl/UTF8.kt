@@ -16,25 +16,10 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-package tk.hack5.telekat.core.crypto
+package tk.hack5.telekat.core.tl
 
-import com.soywiz.krypto.sha1
-import kotlinx.serialization.Serializable
-import org.gciatto.kt.math.BigInteger
-import tk.hack5.telekat.core.tl.BigIntegerSerializer
-import tk.hack5.telekat.core.tl.LongObject
-import tk.hack5.telekat.core.tl.toIntArray
-import tk.hack5.telekat.core.utils.pad
+internal actual fun String.asByteArray(): ByteArray =
+    this.toByteArray(Charsets.UTF_8)
 
-@Serializable
-data class AuthKey(@Serializable(with = BigIntegerSerializer::class) private val data: BigInteger) {
-    val key = data.toByteArray().pad(256)
-    val auxHash: Long
-    val keyId: ByteArray
-
-    init {
-        val hash = key.sha1()
-        auxHash = LongObject.fromTlRepr(hash.toIntArray())!!.second.native // 64 high order bits
-        keyId = hash.sliceArray(12 until 20) // 64 low order bits
-    }
-}
+internal actual fun ByteArray.asString(): String =
+    this.toString(Charsets.UTF_8)

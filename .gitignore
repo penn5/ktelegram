@@ -92,7 +92,7 @@ fabric.properties
 
 # End of https://www.gitignore.io/api/intellij
 
-# Generated files, create with the generator module
+# Generated files, created with the generator module
 core/generated
 
 # Temporary build files

@@ -73,16 +73,9 @@ abstract class Connection(protected val host: String, protected val port: Int) {
         }
     }
 
-    suspend fun recvLoop(output: Channel<ByteArray>) {
-        recvLock.withLock {
-            while (connected == true) {
-                println("connected")
-                val a = recvInternal()
-                output.send(a)
-//               output.send(recvInternal())
-                println("connected2")
-            }
-        }
+    suspend fun recvLoop(output: Channel<ByteArray>) = recvLock.withLock {
+        while (connected == true)
+            output.send(recvInternal())
     }
 
     suspend fun recv(): ByteArray {
@@ -123,7 +116,6 @@ class TcpFullConnection(host: String, port: Int, network: (String, Int) -> TCPCl
         val crc = calculateCRC32(ret)
         writeChannel.writeFully(ret + crc.toByteArray())
         writeChannel.flush()
-        println("sent")
     }
 
     override suspend fun recvInternal(): ByteArray {
@@ -135,14 +127,12 @@ class TcpFullConnection(host: String, port: Int, network: (String, Int) -> TCPCl
         } catch (e: ClosedReceiveChannelException) {
             throw ConnectionClosedError(cause=e)
         }
-        println("len = $len")
         val seq: Int
         try {
             seq = readChannel.readIntLittleEndian()
         } catch (e: ClosedReceiveChannelException) {
             throw ConnectionClosedError(cause=e)
         }
-        println("seq = $seq")
         val ret = ByteArray(len - 12)
         try {
             readChannel.readFully(ret, 0, ret.size)
@@ -159,7 +149,6 @@ class TcpFullConnection(host: String, port: Int, network: (String, Int) -> TCPCl
         val calculatedCrc = calculateCRC32(full)
         if (crc != calculatedCrc)
             error("Invalid CRC in recv! $crc != $calculatedCrc")
-        println(ret.contentToString())
         return ret // We don't care that there is extra data (the CRC) at the end, the fromTlRepr will ignore it.
     }
 }

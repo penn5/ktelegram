@@ -21,9 +21,7 @@ package tk.hack5.telekat.core.packer
 import com.github.aakira.napier.Napier
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.coroutineScope
 import tk.hack5.telekat.core.connection.Connection
 import tk.hack5.telekat.core.encoder.EncryptedMTProtoEncoder
 import tk.hack5.telekat.core.mtproto.*
@@ -42,12 +40,12 @@ class MessagePackerUnpacker(
 ) {
     private val pendingMessages: MutableMap<Long, CompletableDeferred<MessageUnpackAction>> = HashMap(5)
 
-    suspend fun sendAndRecv(message: TLMethod<*>): TLObject<*> = coroutineScope {
+    suspend fun sendAndRecv(message: TLMethod<*>): TLObject<*> {
         val encoded = encoder.wrapAndEncode(message)
-        val deferred = CompletableDeferred<MessageUnpackAction>(coroutineContext[Job])
+        val deferred = CompletableDeferred<MessageUnpackAction>()
         pendingMessages[encoded.second] = deferred
         connection.send(encoded.first)
-        when (val action = deferred.await()) {
+        return when (val action = deferred.await()) {
             is MessageUnpackActionRetry -> sendAndRecv(message)
             is MessageUnpackActionReturn -> action.value
         }
@@ -71,11 +69,10 @@ class MessagePackerUnpacker(
 
     private suspend fun unpackMessage(message: TLObject<*>, msgId: Long? = null) {
         try {
-            println("msg = $message")
             if (message is MessageObject) {
                 return unpackMessage(message.body, message.msgId)
             } else
-                msgId!!
+                state.updateMsgId(msgId!!)
             when (message) {
                 is ObjectType -> {
                     unpackMessage(handleMaybeGzipped(message), msgId)
@@ -100,23 +97,25 @@ class MessagePackerUnpacker(
                 }
                 is PongObject -> pendingMessages[message.msgId]!!.complete(MessageUnpackActionReturn(message))
                 is BadMsgNotificationObject -> {
-                    Napier.e("Bad msg ${message.badMsgId}", tag = tag)
+                    Napier.e("Bad msg ${message.badMsgId} (${message.errorCode})", tag = tag)
                     when (message.errorCode) {
                         in 16..17 -> {
                             TODO("sync time")
                         }
-                        18 -> Napier.e("Server says invalid msgId")
-                        19 -> Napier.e("Server says duped msgId")
+                        18 -> Napier.e("Server says invalid msgId", tag = tag)
+                        19 -> Napier.e("Server says duped msgId", tag = tag)
                         20 -> {
+                            Napier.d("Server complains message too old", tag = tag)
                         } // Just re-send it
-                        32 -> state.lastMsgId += 16
-                        33 -> state.lastMsgId -= 16
+                        32 -> state.seq += 16
+                        33 -> state.seq -= 16
                         in 34..35 -> error("Server says relevancy incorrect")
                         48 -> {
+                            Napier.e("BadMsgNotification related to bad server salt ignored", tag = tag)
                             return
                         } // We will get a BadServerSalt and re-send then
-                        64 -> Napier.e("Server says invalid container")
-                        else -> Napier.e("Server sent invalid BadMsgNotification")
+                        64 -> Napier.e("Server says invalid container", tag = tag)
+                        else -> Napier.e("Server sent invalid BadMsgNotification", tag = tag)
                     }
                     pendingMessages[message.badMsgId]?.complete(MessageUnpackActionRetry)
                 }
@@ -147,7 +146,7 @@ class MessagePackerUnpacker(
                     )
                 }
                 is UpdatesType -> updatesChannel.send(message)
-                else -> Napier.e("new message type - $message")
+                else -> Napier.e("Unknown message type - $message")
             }
         } catch (e: CancellationException) {
             throw e

@@ -22,26 +22,24 @@ fun String.asTlObject() = StringObject(this, true)
 
 class StringObject(private val string: String, override val bare: Boolean) :
     TLObject<String> {
-    @ExperimentalUnsignedTypes
-    override fun _toTlRepr() = string.toByteArray().asTlObject().toTlRepr()
+    override fun _toTlRepr() = string.asByteArray().asTlObject().toTlRepr()
 
     override val native = string
 
-    @ExperimentalUnsignedTypes
-    override val _id = Companion._id
+    override val _id = id
+
+    override val fields by lazy { mapOf<String, TLObject<*>>() }
 
     companion object :
         TLConstructor<StringObject> {
-        @ExperimentalUnsignedTypes
         override fun _fromTlRepr(data: IntArray): Pair<Int, StringObject>? = BytesObject.fromTlRepr(data)?.let {
             Pair(it.first, it.second.native.asString().asTlObject())
         }
 
-        @ExperimentalUnsignedTypes
-        override val _id: UInt? = null
+        override val id: Int? = null
     }
 }
 
-internal fun String.toByteArray() = ByteArray(length) { this[it].toByte() }
+internal expect fun String.asByteArray(): ByteArray
 
-internal fun ByteArray.asString() = String(map { it.toChar() }.toCharArray())
+internal expect fun ByteArray.asString(): String

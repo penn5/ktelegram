@@ -16,25 +16,20 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-package tk.hack5.telekat.core.crypto
+package tk.hack5.telekat.core.utils
 
-import com.soywiz.krypto.sha1
-import kotlinx.serialization.Serializable
-import org.gciatto.kt.math.BigInteger
-import tk.hack5.telekat.core.tl.BigIntegerSerializer
-import tk.hack5.telekat.core.tl.LongObject
-import tk.hack5.telekat.core.tl.toIntArray
-import tk.hack5.telekat.core.utils.pad
+import tk.hack5.telekat.core.tl.TLObject
 
-@Serializable
-data class AuthKey(@Serializable(with = BigIntegerSerializer::class) private val data: BigInteger) {
-    val key = data.toByteArray().pad(256)
-    val auxHash: Long
-    val keyId: ByteArray
+abstract class TLWalker<T> {
+    open val result: T? = null
 
-    init {
-        val hash = key.sha1()
-        auxHash = LongObject.fromTlRepr(hash.toIntArray())!!.second.native // 64 high order bits
-        keyId = hash.sliceArray(12 until 20) // 64 low order bits
+    fun walk(tlObject: TLObject<*>): T? {
+        for (field in tlObject.fields) {
+            if (handle(field.key, field.value))
+                field.value?.let { walk(it) }
+        }
+        return result
     }
+
+    protected open fun handle(key: String, value: TLObject<*>?): Boolean = true
 }

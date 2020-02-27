@@ -31,8 +31,9 @@ class LongObject(private val long: Long, override val bare: Boolean) :
 
     override val native = long
 
-    @ExperimentalUnsignedTypes
-    override val _id = Companion._id
+    override val _id = id
+
+    override val fields by lazy { mapOf<String, TLObject<*>>() }
 
     companion object :
         TLConstructor<LongObject> {
@@ -47,7 +48,6 @@ class LongObject(private val long: Long, override val bare: Boolean) :
             )
         }
 
-        @ExperimentalUnsignedTypes
-        override val _id: UInt? = null
+        override val id: Int? = null
     }
 }

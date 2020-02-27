@@ -52,17 +52,12 @@ open class RSAEncoderImpl : RSAEncoder {
     override fun computeFingerprint(key: RSAPublicKey): Long {
         val n = key.n.toByteArray()
         val e = key.e.toByteArray()
-        println("${n.size}, ${e.size}")
-        println("Computing fp for ${n.contentToString()}")
-        println((n.asTlObject().toTlRepr() + e.asTlObject().toTlRepr()).contentToString())
         val sha = (n.asTlObject().toTlRepr() + e.asTlObject().toTlRepr()).toByteArray().sha1()
         return LongObject.fromTlRepr(sha.sliceArray(sha.size - 8 until sha.size).toIntArray())!!.second.native
     }
 
     override fun encrypt(data: ByteArray, fingerprint: Long): ByteArray? {
         val key = keys.getOrElse(fingerprint) { return null }
-        println("data = ${data.contentToString()}")
-        println("dataint = ${BigInteger(byteArrayOf(0) + data)}")
         val ret = BigInteger(byteArrayOf(0) + data).modPow(key.exponent, key.modulo)!!.toByteArray()
         if (ret.size > 256) {
             require(ret.size == 257) { "Unexpected encrypted data size ${data.size}" }

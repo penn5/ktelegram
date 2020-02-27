@@ -53,10 +53,10 @@ kotlin {
                 api("org.jetbrains.kotlinx:kotlinx-coroutines-core-common:$coroutinesVersion")
                 api("com.github.aakira:napier:$napierVersion")
                 api("io.github.gciatto:kt-math-metadata:$ktMathVersion")
-                implementation("com.soywiz.korlibs.krypto:krypto:$kryptoVersion")
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-io:$kotlinxIoVersion")
+                api("com.soywiz.korlibs.krypto:krypto:$kryptoVersion")
+                api("org.jetbrains.kotlinx:kotlinx-coroutines-io:$kotlinxIoVersion")
                 api("org.jetbrains.kotlinx:kotlinx-serialization-runtime-common:$serializationVersion")
-                implementation("com.soywiz.korlibs.klock:klock:$klockVersion")
+                api("com.soywiz.korlibs.klock:klock:$klockVersion")
             }
         }
         val commonTest by getting {
@@ -70,14 +70,15 @@ kotlin {
                 implementation(kotlin("stdlib-jdk8"))
                 api("org.jetbrains.kotlinx:kotlinx-coroutines-core:$coroutinesVersion")
                 api("com.github.aakira:napier-jvm:$napierVersion")
-                implementation("io.ktor:ktor-network:$ktorVersion")
+                api("io.ktor:ktor-network:$ktorVersion")
                 api("io.github.gciatto:kt-math-jvm:$ktMathVersion")
-                implementation("com.soywiz.korlibs.krypto:krypto-jvm:$kryptoVersion")
+                api("com.soywiz.korlibs.krypto:krypto-jvm:$kryptoVersion")
                 api("org.jetbrains.kotlinx:kotlinx-coroutines-io-jvm:$kotlinxIoVersion")
                 api("org.jetbrains.kotlinx:kotlinx-serialization-runtime:$serializationVersion")
-                implementation("com.soywiz.korlibs.klock:klock-jvm:$klockVersion")
-                implementation("org.bouncycastle:bcprov-jdk15on:$bouncyCastleVersion")
-                implementation("org.bouncycastle:bcpkix-jdk15on:$bouncyCastleVersion")
+                api("com.soywiz.korlibs.klock:klock-jvm:$klockVersion")
+                api("org.bouncycastle:bcprov-jdk15on:$bouncyCastleVersion")
+                api("org.bouncycastle:bcpkix-jdk15on:$bouncyCastleVersion")
+                api("org.jetbrains.kotlinx:kotlinx-coroutines-debug:$coroutinesVersion")
             }
             dependsOn(commonMain)
         }

@@ -22,26 +22,24 @@ fun Int.asTlObject() = IntObject(this, true)
 
 class IntObject(private val int: Int, override val bare: Boolean) :
     TLObject<Int> {
-    @ExperimentalUnsignedTypes
     override fun _toTlRepr(): IntArray {
         return intArrayOf(int)
     }
 
     override val native = int
 
-    @ExperimentalUnsignedTypes
-    override val _id = Companion._id
+    override val _id = id
+
+    override val fields by lazy { mapOf<String, TLObject<*>>() }
 
     companion object :
         TLConstructor<IntObject> {
-        @ExperimentalUnsignedTypes
         override fun _fromTlRepr(data: IntArray): Pair<Int, IntObject>? {
             return data.firstOrNull()?.let {
                 Pair(1, IntObject(it, true))
             }
         }
 
-        @ExperimentalUnsignedTypes
-        override val _id: UInt? = null
+        override val id: Int? = null
     }
 }

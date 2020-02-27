@@ -38,7 +38,7 @@ enum class EntryType {
 
 @ExperimentalUnsignedTypes
 interface TLEntry {
-    val id: UInt
+    val id: Int
     val name: String
     val params: List<TLParam>
     val type: String
@@ -47,22 +47,26 @@ interface TLEntry {
 
 @ExperimentalUnsignedTypes
 @Serializable
-data class TLConstructor(@SerialName("id") private val _id: Int, private val predicate: String, override val params: List<TLParam>, @SerialName("type") private val _type: String) : TLEntry {
+data class TLConstructor(
+    override val id: Int,
+    private val predicate: String,
+    override val params: List<TLParam>, @SerialName("type") private val _type: String
+) : TLEntry {
     override val entryType = EntryType.CONSTRUCTOR
     override val name = fixName(predicate)
-    override val id
-        get() = jsonIdToTlCrc(_id)
     @Transient // kotlinx.serialization.Transient, not kotlin.jvm.Transient
     override val type = fixName(_type)
 }
 
 @ExperimentalUnsignedTypes
 @Serializable
-data class TLMethod(@SerialName("id") private val _id: Int, private val method: String, override val params: List<TLParam>, @SerialName("type") private val _type: String) : TLEntry {
+data class TLMethod(
+    override val id: Int,
+    private val method: String,
+    override val params: List<TLParam>, @SerialName("type") private val _type: String
+) : TLEntry {
     override val entryType = EntryType.METHOD
     override val name = fixName(method)
-    override val id
-        get() = jsonIdToTlCrc(_id)
     @Transient // kotlinx.serialization.Transient, not kotlin.jvm.Transient
     override val type = fixName(_type)
 }
@@ -74,10 +78,6 @@ data class TLParam(@SerialName("name") private val _name: String, @SerialName("t
     @Transient // kotlinx.serialization.Transient, not kotlin.jvm.Transient
     val type = fixName(_type)
 }
-
-// It's actually a UInt but it's irrelevant as we don't apply maths to it
-@ExperimentalUnsignedTypes
-fun jsonIdToTlCrc(id: Int) = (1U shl 32) + id.toUInt() - 1U
 
 fun fixName(name: String): String {
     return name.first() + name.zipWithNext { prev, current ->

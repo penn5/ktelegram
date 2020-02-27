@@ -29,8 +29,9 @@ class DoubleObject(private val double: Double, override val bare: Boolean) :
 
     override val native = double
 
-    @ExperimentalUnsignedTypes
-    override val _id = Companion._id
+    override val _id = id
+
+    override val fields by lazy { mapOf<String, TLObject<*>>() }
 
     companion object :
         TLConstructor<DoubleObject> {
@@ -45,7 +46,6 @@ class DoubleObject(private val double: Double, override val bare: Boolean) :
             }
         }
 
-        @ExperimentalUnsignedTypes
-        override val _id: UInt? = null
+        override val id: Int? = null
     }
 }

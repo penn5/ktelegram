@@ -21,6 +21,8 @@ package tk.hack5.telekat.core.state
 import com.github.aakira.napier.Napier
 import com.soywiz.klock.DateTime
 import com.soywiz.klock.seconds
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 import tk.hack5.telekat.core.crypto.AuthKey
@@ -38,17 +40,18 @@ interface MTProtoState {
     var salt: ByteArray
     val sessionId: ByteArray
     var seq: Int
-    var lastMsgId: Long
     var remoteContentRelatedSeq: Int
+    var lastMsgId: Long
 
-    fun getMsgId(): Long
+
+    suspend fun getMsgId(): Long
     fun validateMsgId(id: Long): Boolean
 
-    fun updateTimeOffset(seconds: Int)
-    fun updateTimeOffset(msgId: Long)
+    suspend fun updateTimeOffset(seconds: Int)
+    suspend fun updateTimeOffset(msgId: Long)
 
     fun updateMsgId(msgId: Long)
-    fun updateSeqNo(seq: Int)
+    suspend fun updateSeqNo(seq: Int)
 }
 
 @Serializable
@@ -60,12 +63,14 @@ data class MTProtoStateImpl(override val authKey: AuthKey? = null) : MTProtoStat
     override val sessionId = Random.nextLong().asTlObject().toTlRepr().toByteArray()
     @Transient
     override var seq = 0
-    override var lastMsgId = 0L
     @Transient
     override var remoteContentRelatedSeq = -1
+    override var lastMsgId = 0L
+    @Transient
+    private val lock = Mutex()
 
     @ExperimentalUnsignedTypes
-    override fun getMsgId(): Long {
+    override suspend fun getMsgId(): Long {
         val now = DateTime.now()
         val sinceEpoch = now - DateTime.EPOCH
         val secsSinceEpoch = sinceEpoch.seconds.toInt()
@@ -73,38 +78,49 @@ data class MTProtoStateImpl(override val authKey: AuthKey? = null) : MTProtoStat
         val nanoseconds = sinceSecond.nanoseconds.roundToInt()
         val secs = secsSinceEpoch + timeOffset
         var newMsgId = secs.shl(32).or(nanoseconds.toLong().shl(2))
-        if (!validateMsgId(newMsgId))
-            newMsgId = lastMsgId
-        lastMsgId = newMsgId
+        lock.withLock {
+            while (newMsgId <= lastMsgId)
+                newMsgId = lastMsgId + 4
+            lastMsgId = newMsgId
+        }
         Napier.d("Generated msg_id=$newMsgId", tag = tag)
         return newMsgId
     }
 
     @ExperimentalUnsignedTypes
-    override fun validateMsgId(id: Long): Boolean = id.toULong() > lastMsgId.toULong()
+    override fun validateMsgId(id: Long): Boolean {
+        val now = DateTime.now()
+        val sinceEpoch = now - DateTime.EPOCH
+        val serverTime = id.toULong().shr(32)
+        if (serverTime < (sinceEpoch - 300.seconds).seconds.toUInt()) return false
+        if (serverTime > (sinceEpoch + 30.seconds).seconds.toUInt()) return false
+        return true
+    }
 
-    override fun updateSeqNo(seq: Int) {
-        require(seq / 2 >= remoteContentRelatedSeq) { "seqno was reduced by the server" }
+    override suspend fun updateSeqNo(seq: Int) {
+        require(seq / 2 >= remoteContentRelatedSeq) { "seqno was reduced by the server ($seq < 2*$remoteContentRelatedSeq)" }
         if (seq.rem(2) == 1) {
             // Content related
-            remoteContentRelatedSeq++
+            lock.withLock {
+                remoteContentRelatedSeq++
+            }
         }
     }
 
-    override fun updateTimeOffset(seconds: Int) {
-        val now = DateTime.now() - DateTime.EPOCH
-        val oldOffset = timeOffset
-        timeOffset = seconds - now.seconds.roundToLong()
-        Napier.d("Updating timeOffset to $$timeOffset (was $oldOffset, t=$now, c=$seconds)", tag = tag)
+    override suspend fun updateTimeOffset(seconds: Int) {
+        lock.withLock {
+            val now = DateTime.now() - DateTime.EPOCH
+            val oldOffset = timeOffset
+            timeOffset = seconds - now.seconds.roundToLong()
+            Napier.d("Updating timeOffset to $$timeOffset (was $oldOffset, t=$now, c=$seconds)", tag = tag)
+        }
     }
 
-    override fun updateTimeOffset(msgId: Long) {
+    override suspend fun updateTimeOffset(msgId: Long) {
         updateTimeOffset(msgId.ushr(32).toInt())
     }
 
     @ExperimentalUnsignedTypes
-    override fun updateMsgId(msgId: Long) {
-        require(validateMsgId(msgId)) { "msg_id was reduced by the server" }
-        lastMsgId = msgId
-    }
+    override fun updateMsgId(msgId: Long) =
+        require(validateMsgId(msgId)) { "msg_id was reduced by the server ($msgId)" }
 }

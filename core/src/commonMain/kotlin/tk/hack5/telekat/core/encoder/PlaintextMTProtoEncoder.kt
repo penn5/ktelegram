@@ -22,11 +22,10 @@ import tk.hack5.telekat.core.state.MTProtoState
 import tk.hack5.telekat.core.tl.*
 
 class PlaintextMTProtoEncoder(state: MTProtoState) : MTProtoEncoder(state) {
-    override fun encode(data: ByteArray): ByteArray = ByteArray(8) { 0 } +
+    override suspend fun encode(data: ByteArray): ByteArray = ByteArray(8) { 0 } +
             state.getMsgId().asTlObject().toTlRepr().toByteArray() + data.size.toByteArray() + data
 
     override fun decode(data: ByteArray): ByteArray {
-        println(data.contentToString())
         if (data.sliceArray(0 until 8).any { it != 0.toByte() })
             error("Invalid authKeyId")
         val msgId = LongObject.fromTlRepr(data.sliceArray(8 until 16).toIntArray())!!.second.native
