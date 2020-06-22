@@ -81,7 +81,7 @@ class MessagePackerUnpacker(
                     // Fix the salt and retry the message
                     Napier.d("Bad server salt, corrected to ${message.newServerSalt}", tag = tag)
                     state.salt = message.newServerSalt.asTlObject().toTlRepr().toByteArray()
-                    pendingMessages[message.badMsgId]!!.complete(MessageUnpackActionRetry)
+                    pendingMessages.getValue(message.badMsgId).complete(MessageUnpackActionRetry)
                 }
                 is NewSessionCreatedObject -> return // We don't care about new sessions, AFAIK
                 is MsgContainerObject -> {
@@ -89,13 +89,13 @@ class MessagePackerUnpacker(
                     message.messages.sortedBy { it.seqno }.forEach { unpackMessage(it, msgId) }
                 }
                 is RpcResultObject -> {
-                    pendingMessages[message.reqMsgId]!!.complete(
+                    pendingMessages[message.reqMsgId]?.complete(
                         MessageUnpackActionReturn(
                             handleMaybeGzipped(message.result)
                         )
                     )
                 }
-                is PongObject -> pendingMessages[message.msgId]!!.complete(MessageUnpackActionReturn(message))
+                is PongObject -> pendingMessages.getValue(message.msgId).complete(MessageUnpackActionReturn(message))
                 is BadMsgNotificationObject -> {
                     Napier.e("Bad msg ${message.badMsgId} (${message.errorCode})", tag = tag)
                     when (message.errorCode) {

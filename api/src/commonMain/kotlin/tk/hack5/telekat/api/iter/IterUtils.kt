@@ -18,14 +18,20 @@
 
 package tk.hack5.telekat.api.iter
 
+import com.github.aakira.napier.Napier
 import kotlinx.coroutines.flow.flow
 
 suspend inline fun <R, O> iter(crossinline function: suspend (O?) -> Pair<Collection<R>, O?>) = flow {
     var lastOutput: Pair<Collection<R>, O?>? = null
     while (lastOutput?.second != null || lastOutput == null) {
-        lastOutput = (function(lastOutput?.second).let {
-            if (it.first.isEmpty() || it.second == null) null else it
-        } ?: break)
-        lastOutput.first.forEach { emit(it) }
+        lastOutput = function(lastOutput?.second)
+        if (lastOutput.first.isEmpty())
+            Napier.w("iter function returned empty collection", tag = "IterTools")
+        else
+            lastOutput.first.forEach { emit(it) }
+        if (lastOutput.second == null) break
     }
 }
+
+// private const val tag = "IterTools"
+// This is inlined manually, because inline functions can't access private vals

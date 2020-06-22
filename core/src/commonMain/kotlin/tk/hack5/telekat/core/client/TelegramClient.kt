@@ -41,6 +41,7 @@ import tk.hack5.telekat.core.tl.*
 import tk.hack5.telekat.core.updates.ObjectType
 import tk.hack5.telekat.core.updates.UpdateHandler
 import tk.hack5.telekat.core.updates.UpdateHandlerImpl
+import tk.hack5.telekat.core.updates.UpdateOrSkipped
 
 private const val tag = "TelegramClient"
 
@@ -60,7 +61,7 @@ abstract class TelegramClient {
         signUpConsent: (Help_TermsOfServiceObject?) -> Pair<String, String>? = { null },
         phoneCode: () -> String,
         password: () -> String
-    ): UserType
+    ): Pair<Boolean?, UserType>
 
     abstract suspend fun disconnect()
 
@@ -69,7 +70,7 @@ abstract class TelegramClient {
 
     abstract fun getAccessHash(constructor: ObjectType, peerId: Int): Long?
     abstract fun getAccessHash(constructor: ObjectType, peerId: Long): Long?
-    abstract val updateCallbacks: List<suspend (UpdateType) -> Unit>
+    abstract val updateCallbacks: List<suspend (UpdateOrSkipped) -> Unit>
     abstract suspend fun catchUp()
 }
 
@@ -97,7 +98,7 @@ open class TelegramClientImpl(
     protected var updatesHandler: UpdateHandler? = null
     protected val activeTasks = mutableListOf<Job>()
 
-    override val updateCallbacks = mutableListOf<suspend (UpdateType) -> Unit>()
+    override val updateCallbacks = mutableListOf<suspend (UpdateOrSkipped) -> Unit>()
 
     override suspend fun connect() {
         session.updates?.let {
@@ -164,19 +165,21 @@ open class TelegramClientImpl(
         signUpConsent: (Help_TermsOfServiceObject?) -> Pair<String, String>?,
         phoneCode: () -> String,
         password: () -> String
-    ): UserType {
-        val ret = logIn(phoneNumber, signUpConsent, phoneCode, password)
+    ): Pair<Boolean?, UserType> {
+        val (loggedIn, ret) = logIn(phoneNumber, signUpConsent, phoneCode, password)
         val state = (this(Updates_GetStateRequest()) as Updates_StateObject)
-        val updatesState = UpdateState(state.seq, state.date, state.qts, mutableMapOf(null to state.pts))
-        session = session.setUpdateState(updatesState)
-        updatesHandler = UpdateHandlerImpl(updatesState, this)
+        if (session.updates == null) {
+            session =
+                session.setUpdateState(UpdateState(state.seq, state.date, state.qts, mutableMapOf(null to state.pts)))
+        }
+        updatesHandler = UpdateHandlerImpl(session.updates!!, this)
         activeTasks += GlobalScope.launch {
             while (true) {
                 val update = updatesHandler!!.updates.receive()
                 updateCallbacks.forEach { it(update) }
             }
         }
-        return ret
+        return loggedIn to ret
     }
 
     protected suspend fun logIn(
@@ -184,11 +187,11 @@ open class TelegramClientImpl(
         signUpConsent: (Help_TermsOfServiceObject?) -> Pair<String, String>?,
         phoneCode: () -> String,
         password: () -> String
-    ): UserType {
+    ): Pair<Boolean?, UserType> {
         if (connection?.connected != true)
             connect()
         try {
-            return getMe()
+            return null to getMe()
         } catch (e: BadRequestError.AuthKeyUnregisteredError) {
             Napier.v("Beginning sign-in", e, tag = tag)
         }
@@ -224,16 +227,16 @@ open class TelegramClientImpl(
                 when (val newAuth = this(Auth_SignUpRequest(phone, sentCode.phoneCodeHash, name.first, name.second))) {
                     is Auth_AuthorizationObject -> {
                         session.save()
-                        return newAuth.user
+                        return true to newAuth.user
                     }
-                    else -> error("Signup failed")
+                    else -> error("Signup failed (unknown $newAuth)")
                 }
             }
             is Auth_AuthorizationObject -> {
                 session.save()
-                return auth.user
+                return false to auth.user
             }
-            else -> error("Login failed")
+            else -> error("Login failed (unknown $auth)")
         }
     }
 
@@ -278,15 +281,17 @@ open class TelegramClientImpl(
     }
 
     override suspend fun <R : TLObject<*>> send(request: TLMethod<R>, encoder: MTProtoEncoder): R {
+        Napier.d(request.toString(), tag = tag)
         connection!!.send(encoder.encode(request.toTlRepr().toByteArray()))
         val response = encoder.decode(connection!!.recv()).toIntArray()
         return request.constructor.fromTlRepr(response)!!.second
     }
 
     override suspend fun <R : TLObject<*>> sendWrapped(request: TLMethod<R>, encoder: MTProtoEncoderWrapped): R {
+        Napier.d(request.toString(), tag = tag)
         val ret = unpacker!!.sendAndRecv(request)
         if (ret is RpcErrorObject)
-            throw RpcError(ret.errorCode, ret.errorMessage)
+            throw RpcError(ret.errorCode, ret.errorMessage, request)
         @Suppress("UNCHECKED_CAST")
         return ret as R
     }

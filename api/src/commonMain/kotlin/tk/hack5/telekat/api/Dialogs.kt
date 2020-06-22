@@ -30,6 +30,7 @@ suspend fun TelegramClient.getDialogs(
     folderId: Int? = null
 ) =
     iter<Dialog, Triple<Int, Int, InputPeerType>> { input ->
+        println("itering dialogs")
         when (val dialogs = this(
             Messages_GetDialogsRequest(
                 excludePinned, folderId, input?.first ?: offsetDate, input?.second ?: offsetId,
@@ -50,9 +51,7 @@ suspend fun TelegramClient.getDialogs(
                 )
             }
             is Messages_DialogsObject -> {
-                val nonFolders = dialogs.dialogs.dropLastWhile { it !is DialogObject }
-                    .let { if (it.isEmpty()) dialogs.dialogs else it }
-                Pair(nonFolders.map { Dialog(it, dialogs) }, null)
+                Pair(dialogs.dialogs.map { Dialog(it, dialogs) }, null)
             }
             is Messages_DialogsNotModifiedObject -> error("dialog hash NI")
         }

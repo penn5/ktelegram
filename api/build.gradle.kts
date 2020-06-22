@@ -34,6 +34,7 @@ repositories {
 }
 
 val coroutinesVersion = "1.3.3"
+val napierVersion = "1.1.0"
 
 kotlin {
     jvm()
@@ -43,7 +44,11 @@ kotlin {
             kotlin.srcDir("generated/commonMain")
             dependencies {
                 implementation(kotlin("stdlib-common"))
-                api("tk.hack5.telekat:core:0.0.1-SNAPSHOT")
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core-common:$coroutinesVersion")
+                implementation("com.github.aakira:napier:$napierVersion")
+                implementation("com.github.aakira:napier-jvm:$napierVersion")
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-debug:$coroutinesVersion")
+                implementation(project(":core"))
             }
         }
         val commonTest by getting {
@@ -55,7 +60,8 @@ kotlin {
         jvm().compilations["main"].defaultSourceSet {
             dependencies {
                 implementation(kotlin("stdlib-jdk8"))
-                api("tk.hack5.telekat:core-jvm:0.0.1-SNAPSHOT")
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:$coroutinesVersion")
+                implementation(project(":core"))
             }
             dependsOn(commonMain)
         }

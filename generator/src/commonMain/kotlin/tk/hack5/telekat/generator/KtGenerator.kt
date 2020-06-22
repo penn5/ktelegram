@@ -417,6 +417,7 @@ class ErrorsWriter(output: (String) -> Unit, packageName: String, private val er
     KtWriter(output, packageName) {
     override fun build() {
         writeHeader(false)
+        writeImports()
         writeRootClass()
         write()
         writeSubClass(300..399, "Redirected")
@@ -428,33 +429,43 @@ class ErrorsWriter(output: (String) -> Unit, packageName: String, private val er
         writeRegexFix()
     }
 
+    private fun writeImports() {
+        write("import tk.hack5.telekat.core.tl.TLMethod")
+    }
+
     private fun writeRootClass() {
-        write("open class RpcError(val code: Int, val id: String, message: String?) : Error(message) {", 1)
+        write(
+            "open class RpcError(val code: Int, val id: String, message: String?, val request: TLMethod<*>) : Error(\"\$message (caused by \$request)\") {",
+            1
+        )
         write("companion object {", 1)
-        write("operator fun invoke(code: Int, id: String) = when (code) {", 1)
-        write("in 300..399 -> RedirectedError(code, id)")
-        write("in 400..499 -> BadRequestError(code, id)")
-        write("in 500..599 -> InternalServerError(code, id)")
-        write("else -> RpcError(code, id, null)")
+        write("operator fun invoke(code: Int, id: String, request: TLMethod<*>) = when (code) {", 1)
+        write("in 300..399 -> RedirectedError(code, id, request)")
+        write("in 400..499 -> BadRequestError(code, id, request)")
+        write("in 500..599 -> InternalServerError(code, id, request)")
+        write("else -> RpcError(code, id, null, request)")
         writeDeclEnd()
         writeDeclEnd()
         writeDeclEnd()
     }
 
     private fun writeSubClass(codes: IntRange, name: String) {
-        write("open class ${name}Error(code: Int, id: String, message: String?) : RpcError(code, id, message) {", 1)
+        write(
+            "open class ${name}Error(code: Int, id: String, message: String?, request: TLMethod<*>) : RpcError(code, id, message, request) {",
+            1
+        )
         write("companion object {", 1)
-        write("operator fun invoke(code: Int, id: String) = when(id) {", 1)
+        write("operator fun invoke(code: Int, id: String, request: TLMethod<*>) = when(id) {", 1)
         val applicableErrors = errors.filter { codes.intersect(it.codes).isNotEmpty() }
         for (error in applicableErrors) {
             val hasRegex = !Regex("[A-Z0-9_]+").matches(error.name)
             write(
                 (if (!hasRegex) "\"${error.name}\"" else "in Regex(\"${error.name}\")")
-                        + " -> ${fixError(error.name)}Error(code, id" +
+                        + " -> ${fixError(error.name)}Error(code, id, request" +
                         if (hasRegex) ", Regex(\"${error.name}\").matchEntire(id)!!.groupValues[1].toInt())" else ")"
             )
         }
-        write("else -> ${name}Error(code, id, null)")
+        write("else -> ${name}Error(code, id, null, request)")
         writeDeclEnd()
         writeDeclEnd()
 
@@ -464,16 +475,16 @@ class ErrorsWriter(output: (String) -> Unit, packageName: String, private val er
                 paramName = Regex("\\{([a-z]+)}").find(error.description)?.groupValues?.getOrNull(1)
             write()
             write(
-                "class ${fixError(error.name)}Error(code: Int, id: String" + (
+                "class ${fixError(error.name)}Error(code: Int, id: String, request: TLMethod<*>" + (
                         if (paramName != null)
                             ", val $paramName: Int"
                         else
                             ""
                         ) + ") : ${name}Error(code, id, \"${error.description}\"" + (
                         if (paramName != null) {
-                            ".replace(\"{$paramName}\", $paramName.toString()))"
+                            ".replace(\"{$paramName}\", $paramName.toString()), request)"
                         } else
-                            ")"
+                            ", request)"
                         )
             )
         }

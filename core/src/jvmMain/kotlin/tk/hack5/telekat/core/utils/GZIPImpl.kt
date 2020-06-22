@@ -29,5 +29,5 @@ actual object GZIPImpl : GZIP {
         return output.toByteArray()
     }
 
-    override fun decompress(input: ByteArray): ByteArray = GZIPInputStream(input.inputStream()).readAllBytes()
+    override fun decompress(input: ByteArray): ByteArray = GZIPInputStream(input.inputStream()).readBytes()
 }

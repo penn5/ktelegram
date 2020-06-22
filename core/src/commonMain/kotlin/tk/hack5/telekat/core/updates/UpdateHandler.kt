@@ -18,13 +18,15 @@
 
 package tk.hack5.telekat.core.updates
 
-import kotlinx.coroutines.*
+import com.github.aakira.napier.Napier
+import kotlinx.coroutines.CompletableJob
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import tk.hack5.telekat.core.client.TelegramClient
 import tk.hack5.telekat.core.state.UpdateState
 import tk.hack5.telekat.core.tl.*
+import tk.hack5.telekat.core.utils.BaseActor
 import tk.hack5.telekat.core.utils.TLWalker
 
 enum class ObjectType {
@@ -205,379 +207,395 @@ class AccessHashGetter : TLWalker<MutableMap<String, MutableMap<Long, Long>>>() 
 interface UpdateHandler {
     suspend fun getEntities(update: TLObject<*>): MutableMap<String, MutableMap<Long, Long>>
     suspend fun handleUpdates(update: TLObject<*>)
-    val updates: Channel<UpdateType>
+    val updates: Channel<UpdateOrSkipped>
     suspend fun catchUp()
 }
 
-open class UpdateHandlerImpl(protected val updateState: UpdateState, val client: TelegramClient) : UpdateHandler {
-    protected val updateStateLock = Mutex()
-    protected val pendingUpdatesSeq = mutableMapOf<Int, Pair<CompletableJob, UpdatesType>>()
-    protected val pendingUpdatesSeqLock = Mutex()
-    protected val pendingUpdatesPts =
-        mutableMapOf<Int?, MutableMap<Int, MutableList<Pair<CompletableJob, UpdateType>>>>()
-    protected val pendingUpdatesPtsLock = Mutex()
+open class UpdateHandlerImpl(
+    protected val updateState: UpdateState,
+    val client: TelegramClient,
+    protected val maxDifference: Int? = null,
+    val maxChannelDifference: Int = 100
+) : BaseActor(), UpdateHandler {
+    val pendingUpdatesSeq = mutableMapOf<Int, CompletableJob>()
+    val pendingUpdatesPts = mutableMapOf<Pair<Int?, Int>, CompletableJob>()
 
-    override val updates = Channel<UpdateType>(Channel.UNLIMITED)
+    override val updates = Channel<UpdateOrSkipped>(Channel.UNLIMITED)
 
-    override suspend fun handleUpdates(update: TLObject<*>) = checkUpdates(update)
+    override suspend fun handleUpdates(update: TLObject<*>) {
+        if (update is UpdatesType) handleUpdates(update)
+    }
 
     override suspend fun getEntities(update: TLObject<*>) = AccessHashGetter().walk(update)!!
 
-    override suspend fun catchUp() = updateStateLock.withLock { fetchUpdates() }
-
-    protected suspend fun checkUpdates(update: TLObject<*>) {
-        println(update)
-        when (update) {
-            is UpdatesCombinedObject -> {
-                checkUpdateSeq(update, update.seqStart, update.seq)
+    suspend fun handleUpdates(updates: UpdatesType) {
+        val innerUpdates = when (updates) {
+            is UpdatesTooLongObject -> {
+                fetchUpdates()
+                return
             }
-            is UpdatesObject -> {
-                checkUpdateSeq(update, update.seq)
-            }
-            is UpdatesType -> dispatchUpdates(update)
+            is UpdateShortMessageObject -> listOf(
+                UpdateNewMessageObject(
+                    MessageObject(
+                        out = updates.out,
+                        mentioned = updates.mentioned,
+                        mediaUnread = updates.mediaUnread,
+                        silent = updates.silent,
+                        post = false,
+                        fromScheduled = false,
+                        legacy = false,
+                        editHide = false,
+                        id = updates.id,
+                        fromId = if (updates.out) client.getInputMe().userId else updates.userId,
+                        toId = PeerUserObject(if (updates.out) updates.userId else client.getInputMe().userId),
+                        fwdFrom = updates.fwdFrom,
+                        viaBotId = updates.viaBotId,
+                        replyToMsgId = updates.replyToMsgId,
+                        date = updates.date,
+                        message = updates.message,
+                        media = null,
+                        replyMarkup = null,
+                        entities = updates.entities
+                    ), updates.pts, updates.ptsCount
+                )
+            )
+            is UpdateShortChatMessageObject -> listOf(
+                UpdateNewMessageObject(
+                    MessageObject(
+                        out = updates.out,
+                        mentioned = updates.mentioned,
+                        mediaUnread = updates.mediaUnread,
+                        silent = updates.silent,
+                        post = false,
+                        fromScheduled = false,
+                        legacy = false,
+                        editHide = false,
+                        id = updates.id,
+                        fromId = updates.fromId,
+                        toId = PeerChatObject(updates.chatId),
+                        fwdFrom = updates.fwdFrom,
+                        viaBotId = updates.viaBotId,
+                        replyToMsgId = updates.replyToMsgId,
+                        date = updates.date,
+                        message = updates.message,
+                        media = null,
+                        replyMarkup = null,
+                        entities = updates.entities
+                    ), updates.pts, updates.ptsCount
+                )
+            )
+            is UpdateShortObject -> listOf(updates.update)
+            is UpdatesCombinedObject -> updates.updates
+            is UpdatesObject -> updates.updates
+            is UpdateShortSentMessageObject -> return // handled by rpc caller
         }
-    }
+        updates.date?.let { checkDate(it) }
+        val (hasPts, hasNoPts) = innerUpdates.partition { it.pts != null }
+        for (update in hasPts) {
+            val pts = update.pts!!
+            val ptsCount = update.ptsCount
+            if (update is UpdateChannelTooLongObject) {
+                fetchChannelUpdates(update.channelId)
+                return
+            }
+            val (applicablePts, job) = act {
+                val localPts = updateState.pts[update.channelId]
+                val applicablePts = pts - ptsCount!!
 
-    protected suspend fun checkUpdateSeq(updates: UpdatesType, seqStart: Int, seq: Int = seqStart) =
-        updateStateLock.withLock {
-            when {
-                seqStart == 0 -> updateStateLock.withoutLock {
-                    dispatchUpdates(updates)
+                val job = when {
+                    (ptsCount == 0 && pts >= localPts?.minus(1) ?: 0)
+                            || applicablePts == 0 -> {
+                        // update doesn't need to change the pts
+                        dispatchUpdate(update)
+                        null
+                    }
+                    applicablePts == localPts || localPts == null -> {
+                        dispatchUpdate(update)
+                        updateState.pts[update.channelId] = pts
+                        null
+                    }
+                    applicablePts < localPts -> {
+                        Napier.d("Duplicate update $update (localPts=$localPts)", tag = tag)
+                        null
+                    }
+                    else -> {
+                        //require(!preventGapFilling) { "Gap found in gap refill($applicablePts, $localPts, ${update.channelId})" }
+                        val job = Job()
+                        pendingUpdatesPts[update.channelId to applicablePts] = job
+                        job
+                    }
                 }
-                updateState.seq + 1 == seqStart -> {
-                    updateState.seq = seq
-                    updateStateLock.withoutLock {
-                        dispatchUpdates(updates)
-                    }
-                    pendingUpdatesSeqLock.withLock {
-                        pendingUpdatesSeq.remove(seq)
-                    }?.let {
-                        updateStateLock.withoutLock {
-                            checkUpdates(it.second)
-                        }
-                        it.first.complete()
-                    }
+                Pair(applicablePts, job)
+            }
+            job?.let {
+                val join = withTimeoutOrNull(500) {
+                    it.join()
                 }
-                updateState.seq + 1 < seqStart -> {
-                    val updateHandledElsewhere = Job()
-                    pendingUpdatesSeqLock.withLock {
-                        pendingUpdatesSeq[seqStart - 1] = Pair(updateHandledElsewhere, updates)
-                    }
-                    val jobResult = updateStateLock.withoutLock {
-                        withTimeoutOrNull(500) {
-                            updateHandledElsewhere.join()
-                        }
-                    }
-                    if (jobResult == null) {
-                        // It wasn't fetched in 500ms, do it manually
+                pendingUpdatesPts.remove(update.channelId to applicablePts)
+                if (join == null) {
+                    if (update.channelId != null) {
+                        fetchChannelUpdates(update.channelId!!)
+                    } else {
                         fetchUpdates()
                     }
+                    return // server will resend this update too
+                }
+                dispatchUpdate(update)
+                act {
+                    updateState.pts[update.channelId] = pts
+                    pendingUpdatesPts[update.channelId to pts]?.complete()
                 }
             }
-            Unit
         }
 
-    protected suspend fun dispatchUpdates(updates: UpdatesType) {
-        when (updates) {
-            is UpdatesTooLongObject -> updateStateLock.withLock { fetchUpdates() }
-            is UpdateShortMessageObject -> {
-                updateDate(updates.date)
-                handleSingleUpdate(
-                    UpdateNewMessageObject(
-                        MessageObject(
-                            updates.out,
-                            updates.mentioned,
-                            updates.mediaUnread,
-                            updates.silent,
-                            false,
-                            false,
-                            false,
-                            false,
-                            updates.id,
-                            if (updates.out) client.getInputMe().userId else updates.userId,
-                            PeerUserObject(if (updates.out) updates.userId else client.getInputMe().userId),
-                            updates.fwdFrom,
-                            updates.viaBotId,
-                            updates.replyToMsgId,
-                            updates.date,
-                            updates.message,
-                            null,
-                            null,
-                            updates.entities
-                        ), updates.pts, updates.ptsCount
-                    )
-                )
-            }
-            is UpdateShortChatMessageObject -> {
-                updateDate(updates.date)
-                handleSingleUpdate(
-                    UpdateNewMessageObject(
-                        MessageObject(
-                            updates.out,
-                            updates.mentioned,
-                            updates.mediaUnread,
-                            updates.silent,
-                            false,
-                            false,
-                            false,
-                            false,
-                            updates.id,
-                            updates.fromId,
-                            PeerChatObject(updates.chatId),
-                            updates.fwdFrom,
-                            updates.viaBotId,
-                            updates.replyToMsgId,
-                            updates.date,
-                            updates.message,
-                            null,
-                            null,
-                            updates.entities
-                        ), updates.pts, updates.ptsCount
-                    )
-                )
-            }
-            is UpdateShortObject -> {
-                updateDate(updates.date)
-                handleSingleUpdate(updates.update)
-            }
-            is UpdatesCombinedObject -> {
-                updateDate(updates.date)
-                if (updates.seq != 0)
-                    updateState.seq = updates.seq
-                coroutineScope {
-                    updates.updates.forEach { launch { handleSingleUpdate(it) } }
+        val (applicableSeq, job) = act {
+            val applicableSeq = updates.seq?.minus(1)
+            val localSeq = updateState.seq
+            val job = when {
+                applicableSeq == null || applicableSeq == -1 -> {
+                    // update order doesn't matter
+                    for (update in hasNoPts) {
+                        dispatchUpdate(update)
+                    }
+                    null
+                }
+                applicableSeq == localSeq -> {
+                    for (update in hasNoPts) {
+                        dispatchUpdate(update)
+                    }
+                    updateState.seq = updates.seq!!
+                    null
+                }
+                applicableSeq < localSeq -> {
+                    Napier.d("Duplicate updates $updates (localSeq=$localSeq)", tag = tag)
+                    null
+                }
+                else -> {
+                    //require(!preventGapFilling) { "Gap found in gap refill($applicableSeq, $localSeq)" }
+                    val job = Job()
+                    pendingUpdatesSeq[applicableSeq] = job
+                    job
                 }
             }
-            is UpdatesObject -> {
-                updateDate(updates.date)
-                if (updates.seq != 0)
-                    updateState.seq = updates.seq
-                coroutineScope {
-                    updates.updates.forEach { launch { handleSingleUpdate(it) } }
-                    println("all done")
-                }
+            Pair(applicableSeq, job)
+        }
+        job?.let {
+            Napier.d("Waiting for update with seq=$applicableSeq", tag = tag)
+            val join = withTimeoutOrNull(500) {
+                it.join()
             }
-            // Don't handle updateShortSentMessage because it has highly request-specific requirements
+            if (join == null) {
+                act {
+                    pendingUpdatesSeq.remove(applicableSeq)
+                }
+                fetchUpdates()
+                return // server will resend this update too
+            }
+            for (update in hasNoPts) {
+                dispatchUpdate(update)
+            }
+            act {
+                updateState.seq = applicableSeq!! + 1
+                pendingUpdatesSeq[applicableSeq + 1]?.complete()
+            }
         }
     }
 
-    protected suspend fun updateDate(date: Int) = updateStateLock.withLock {
-        // Surely there is a better way? I'd rather avoid AtomicInt because it's hard to serialize
+    override suspend fun catchUp() = fetchUpdates()
+
+    protected suspend fun checkDate(date: Int) = act {
         if (date > updateState.date)
             updateState.date = date
     }
 
-    protected suspend fun handleSingleUpdate(update: UpdateType) {
-        when (update) {
-            is UpdateNewMessageObject -> checkUpdatePts(update, null, pts = update.pts, ptsCount = update.ptsCount)
-            is UpdateDeleteMessagesObject -> checkUpdatePts(update, null, pts = update.pts, ptsCount = update.ptsCount)
-            is UpdateReadHistoryInboxObject -> checkUpdatePts(
-                update,
-                null,
-                pts = update.pts,
-                ptsCount = update.ptsCount
-            )
-            is UpdateReadHistoryOutboxObject -> checkUpdatePts(
-                update,
-                null,
-                pts = update.pts,
-                ptsCount = update.ptsCount
-            )
-            is UpdateWebPageObject -> checkUpdatePts(update, null, pts = update.pts, ptsCount = update.ptsCount)
-            is UpdateReadMessagesContentsObject -> checkUpdatePts(
-                update,
-                null,
-                pts = update.pts,
-                ptsCount = update.ptsCount
-            )
-            is UpdateChannelTooLongObject -> updateStateLock.withLock { fetchChannelUpdates(update.channelId) }
-            is UpdateNewChannelMessageObject -> checkUpdatePts(
-                update,
-                (update.message.toId as PeerChannelObject).channelId,
-                update.pts,
-                update.ptsCount
-            )
-            is UpdateReadChannelInboxObject -> checkUpdatePts(update, update.channelId, update.pts)
-            is UpdateDeleteChannelMessagesObject -> checkUpdatePts(
-                update,
-                update.channelId,
-                update.pts,
-                update.ptsCount
-            )
-            is UpdateEditChannelMessageObject -> checkUpdatePts(
-                update,
-                (update.message.toId as PeerChannelObject).channelId,
-                update.pts,
-                update.ptsCount
-            )
-            is UpdateEditMessageObject -> checkUpdatePts(update, null, pts = update.pts, ptsCount = update.ptsCount)
-            //is UpdatePtsChangedObject -> updateState.pts[null] = getState().pts
-            is UpdateChannelWebPageObject -> checkUpdatePts(update, update.channelId, update.pts, update.ptsCount)
-            else -> dispatchUpdate(update)
-        }
+    protected fun dispatchUpdate(update: UpdateType) {
+        require(updates.offer(Update(update))) { "Failed to offer update" }
     }
 
     protected suspend fun fetchUpdates() {
-        require(updateStateLock.isLocked) { "updateStateLock is not locked during fetch - this can lead to concurrency errors" }
         val updates = mutableListOf<UpdateType>()
         var tmpState: Updates_StateObject? = null
         loop@ while (true) {
             val difference = client(
-                Updates_GetDifferenceRequest(
-                    tmpState?.pts ?: updateState.pts[null]!!,
-                    null,
-                    tmpState?.date ?: updateState.date,
-                    tmpState?.qts ?: updateState.qts
-                )
+                act {
+                    Updates_GetDifferenceRequest(
+                        tmpState?.pts ?: updateState.pts[null]!!,
+                        maxDifference,
+                        tmpState?.date ?: updateState.date,
+                        tmpState?.qts ?: updateState.qts
+                    )
+                }
             )
-            println("difference = $difference")
             when (difference) {
                 is Updates_DifferenceObject -> {
-                    println(
-                        "dispatching updates: ${updates + difference.otherUpdates + generateUpdates(
-                            difference.newMessages,
-                            difference.newEncryptedMessages
-                        )}"
-                    )
                     val state = difference.state as Updates_StateObject
-                    updateStateLock.withoutLock {
-                        dispatchUpdates(
-                            UpdatesObject(
-                                updates + difference.otherUpdates + generateUpdates(
-                                    difference.newMessages,
-                                    difference.newEncryptedMessages
-                                ),
-                                difference.users,
-                                difference.chats,
-                                state.date,
-                                state.seq
-                            )
+                    handleUpdates(
+                        UpdatesObject(
+                            updates + difference.otherUpdates + generateUpdates(
+                                difference.newMessages,
+                                difference.newEncryptedMessages,
+                                ::UpdateNewMessageObject
+                            ),
+                            difference.users,
+                            difference.chats,
+                            state.date,
+                            state.seq
                         )
-                    }
-                    println("fetched updates ${updateState.seq} -> ${state.seq}")
-                    require(updateState.date == state.date)
-                    require(updateState.pts[null] == state.pts)
-                    require(updateState.qts == state.qts)
-                    require(updateState.seq == state.seq)
-//                    updateState.date = state.date
-//                    updateState.pts[null] = state.pts
-//                    updateState.qts = state.qts
-//                    updateState.seq = state.seq
+                    )
                     break@loop
                 }
                 is Updates_DifferenceSliceObject -> {
                     tmpState = difference.intermediateState as Updates_StateObject
                     updates += difference.otherUpdates + generateUpdates(
                         difference.newMessages,
-                        difference.newEncryptedMessages
+                        difference.newEncryptedMessages,
+                        ::UpdateNewMessageObject
                     )
                 }
                 is Updates_DifferenceEmptyObject -> break@loop
-                is Updates_DifferenceTooLongObject -> break@loop
+                is Updates_DifferenceTooLongObject -> {
+                    act {
+                        require(this.updates.offer(Skipped(null))) { "Failed to offer drop message" }
+                        updateState.pts[null] = difference.pts
+                    }
+                    break@loop
+                }
+            }
+        }
+    }
+
+    protected suspend fun fetchChannelUpdates(channelId: Int) {
+        val inputChannel = InputChannelObject(channelId, client.getAccessHash(ObjectType.CHANNEL, channelId)!!)
+        val pts = act {
+            val pts = updateState.pts[channelId]
+            if (pts == null) {
+                updateState.pts[channelId] =
+                    ((client(Channels_GetFullChannelRequest(inputChannel)) as Messages_ChatFullObject).fullChat as ChannelFullObject).pts
+                null
+            } else {
+                pts
+            }
+        } ?: return
+        val result = client(
+            Updates_GetChannelDifferenceRequest(
+                true,
+                inputChannel,
+                ChannelMessagesFilterEmptyObject(),
+                pts,
+                maxChannelDifference
+            )
+        )
+        when (result) {
+            is Updates_ChannelDifferenceEmptyObject -> {
+            }
+            is Updates_ChannelDifferenceObject -> {
+                handleUpdates(
+                    UpdatesObject(
+                        result.otherUpdates + generateUpdates(
+                            result.newMessages,
+                            listOf(),
+                            ::UpdateNewChannelMessageObject
+                        ),
+                        result.users,
+                        result.chats,
+                        result.pts,
+                        0
+                    )
+                )
+                act { updateState.pts[channelId] = result.pts } // updates sent in the difference may not have a pts
+                if (!result.final) {
+                    fetchChannelUpdates(channelId)
+                }
+            }
+            is Updates_ChannelDifferenceTooLongObject -> act {
+                updates.offer(Skipped(channelId))
+                updateState.pts[channelId] = (result.dialog as DialogObject).pts!!
             }
         }
     }
 
     protected fun generateUpdates(
         newMessages: List<MessageType>,
-        newEncryptedMessages: List<EncryptedMessageType>
-    ): List<UpdateType> = newMessages.map {
-        UpdateNewMessageObject(
-            it,
-            0,
-            0
-        )
-    } + newEncryptedMessages.map { UpdateNewEncryptedMessageObject(it, 0) }
-
-    protected suspend fun fetchChannelUpdates(channelId: Int) {
-        require(updateStateLock.isLocked) { "updateStateLock is not locked during channel fetch - this can lead to concurrency errors" }
-        val pts = updateState.pts[channelId]
-        val inputChannel = InputChannelObject(channelId, client.getAccessHash(ObjectType.CHANNEL, channelId)!!)
-        if (pts == null)
-        // Fetch new pts
-            updateState.pts[channelId] =
-                ((client(Channels_GetFullChannelRequest(inputChannel)) as Messages_ChatFullObject).fullChat as ChannelFullObject).pts
-        else {
-            // Fetch the update, meaning we get access to all entities for entity caching.
-            // TODO make this disableable this when entity cache disablement is supported
-            val result = client(
-                Updates_GetChannelDifferenceRequest(
-                    true,
-                    inputChannel,
-                    ChannelMessagesFilterEmptyObject(),
-                    pts,
-                    100
-                )
+        newEncryptedMessages: List<EncryptedMessageType>,
+        constructor: (MessageType, Int, Int, Boolean) -> UpdateType
+    ): List<UpdateType> =
+        newMessages.map {
+            constructor(
+                it,
+                0,
+                0,
+                false
             )
-            when (result) {
-                is Updates_ChannelDifferenceEmptyObject -> {
-                }
-                is Updates_ChannelDifferenceObject -> {
-                    updateState.pts[channelId] = result.pts
-                    if (!result.final) {
-                        fetchChannelUpdates(channelId)
-                    }
-                }
-                is Updates_ChannelDifferenceTooLongObject -> {
-                    updateState.pts[channelId] = (result.dialog as DialogObject).pts!!
-                    fetchChannelUpdates(channelId)
-                }
-            }
-        }
-    }
+        } + newEncryptedMessages.map { UpdateNewEncryptedMessageObject(it, 0) }
 
-    protected suspend fun checkUpdatePts(update: UpdateType, channelId: Int?, pts: Int, ptsCount: Int = 0) =
-        updateStateLock.withLock {
-            val localPts = updateState.pts[channelId]
-            println("current stats")
-            println(updateState.pts[channelId])
-            println(pendingUpdatesPts[channelId])
-            println(pendingUpdatesPts)
-            when {
-                localPts == null || localPts + ptsCount == pts -> {
-                    if (ptsCount > 0)
-                        updateState.pts[channelId] = pts
-                    dispatchUpdate(update)
-                    pendingUpdatesPtsLock.withLock {
-                        pendingUpdatesPts[channelId]?.remove(pts)
-                    }?.forEach {
-                        handleSingleUpdate(it.second)
-                        it.first.complete()
-                    }
-                }
-                localPts + ptsCount > pts -> return
-                localPts + ptsCount < pts -> {
-                    println("PTS MISSING!!!!!!!!!!!!!!!!!!!!!! $localPts $pts $ptsCount $update")
-                    val updateHandledElsewhere = Job()
-                    pendingUpdatesPtsLock.withLock {
-                        pendingUpdatesPts.getOrPut(channelId, { mutableMapOf() })
-                            .getOrPut(pts - ptsCount, { mutableListOf() }).add(Pair(updateHandledElsewhere, update))
-                    }
-                    val jobResult = updateStateLock.withoutLock {
-                        withTimeoutOrNull(500) {
-                            updateHandledElsewhere.join()
-                        }
-                    }
-                    if (jobResult == null) {
-                        if (channelId == null)
-                            fetchUpdates()
-                        else {
-                            fetchChannelUpdates(channelId)
-                            println("FETCH COMPLETE FOR PTS MISSING $update")
-                            println(updateState.pts[channelId])
-                            println(pendingUpdatesPts[channelId])
-                            println(pendingUpdatesPts)
-                        }
-                    }
-                }
-            }
-            Unit
-        }
 
-    protected suspend fun dispatchUpdate(update: UpdateType) = updateStateLock.withoutLock {
-        updates.send(update)
-    }
+    val UpdatesType.date
+        get() = when (this) {
+            is UpdateShortMessageObject -> date
+            is UpdateShortChatMessageObject -> date
+            is UpdateShortObject -> date
+            is UpdatesCombinedObject -> date
+            is UpdatesObject -> date
+            is UpdateShortSentMessageObject -> date
+            else -> null
+        }
+    val UpdatesType.seq
+        get() = when (this) {
+            is UpdatesCombinedObject -> seq
+            is UpdatesObject -> seq
+            else -> null
+        }
+    private val UpdateType.channelId
+        get() = when (this) {
+            is UpdateNewChannelMessageObject -> (message.toId as PeerChannelObject).channelId
+            is UpdateChannelTooLongObject -> channelId
+            is UpdateReadChannelInboxObject -> channelId
+            is UpdateDeleteChannelMessagesObject -> channelId
+            is UpdateEditChannelMessageObject -> (message.toId as PeerChannelObject).channelId
+            is UpdateChannelWebPageObject -> channelId
+            else -> null
+        }
+    private val UpdateType.pts
+        get() = when (this) {
+            is UpdateNewChannelMessageObject -> pts
+            is UpdateNewMessageObject -> pts
+            is UpdateDeleteMessagesObject -> pts
+            is UpdateReadHistoryInboxObject -> pts
+            is UpdateReadHistoryOutboxObject -> pts
+            is UpdateWebPageObject -> pts
+            is UpdateReadMessagesContentsObject -> pts
+            is UpdateChannelTooLongObject -> pts
+            is UpdateReadChannelInboxObject -> pts - 1 // this one is messed up, but -1 seems to fix it
+            is UpdateDeleteChannelMessagesObject -> pts
+            is UpdateEditChannelMessageObject -> pts
+            is UpdateEditMessageObject -> pts
+            is UpdateChannelWebPageObject -> pts
+            is UpdateFolderPeersObject -> pts
+            else -> null
+        }
+    private val UpdateType.ptsCount
+        get() = when (this) {
+            is UpdateNewChannelMessageObject -> ptsCount
+            is UpdateNewMessageObject -> ptsCount
+            is UpdateDeleteMessagesObject -> ptsCount
+            is UpdateReadHistoryInboxObject -> ptsCount
+            is UpdateReadHistoryOutboxObject -> ptsCount
+            is UpdateWebPageObject -> ptsCount
+            is UpdateReadMessagesContentsObject -> ptsCount
+            is UpdateChannelTooLongObject -> null
+            is UpdateReadChannelInboxObject -> 0
+            is UpdateDeleteChannelMessagesObject -> ptsCount
+            is UpdateEditChannelMessageObject -> ptsCount
+            is UpdateEditMessageObject -> ptsCount
+            is UpdateChannelWebPageObject -> ptsCount
+            is UpdateFolderPeersObject -> ptsCount
+            else -> null
+        }
 }
+
+sealed class UpdateOrSkipped(open val update: UpdateType?)
+data class Update(override val update: UpdateType) : UpdateOrSkipped(update)
+data class Skipped(val channelId: Int?) : UpdateOrSkipped(null)
 
 private val MessageType.toId: PeerType?
     get() = when (this) {
@@ -586,11 +604,4 @@ private val MessageType.toId: PeerType?
         is MessageServiceObject -> toId
     }
 
-private suspend inline fun <T> Mutex.withoutLock(owner: Any? = null, action: () -> T): T {
-    unlock(owner)
-    try {
-        return action()
-    } finally {
-        lock(owner)
-    }
-}
+private const val tag = "UpdateHandler"

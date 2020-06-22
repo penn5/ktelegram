@@ -57,7 +57,7 @@ private fun amain() = runBlocking {
     println("starting catchup!")
     client.catchUp()
     println("catch up complete!")
-    delay(10000)
-    DebugProbes.dumpCoroutines()
+    delay(30000)
+    //DebugProbes.dumpCoroutines()
     client.disconnect()
 }
