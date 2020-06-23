@@ -68,13 +68,13 @@ abstract class TelegramClient {
     abstract suspend fun getMe(): UserObject
     abstract suspend fun getInputMe(): InputPeerUserObject
 
-    abstract fun getAccessHash(constructor: ObjectType, peerId: Int): Long?
-    abstract fun getAccessHash(constructor: ObjectType, peerId: Long): Long?
-    abstract val updateCallbacks: List<suspend (UpdateOrSkipped) -> Unit>
+    abstract suspend fun getAccessHash(constructor: ObjectType, peerId: Int): Long?
+    abstract suspend fun getAccessHash(constructor: ObjectType, peerId: Long): Long?
+    abstract var updateCallbacks: List<suspend (UpdateOrSkipped) -> Unit>
     abstract suspend fun catchUp()
 }
 
-open class TelegramClientImpl(
+open class TelegramClientCoreImpl(
     protected val apiId: String, protected val apiHash: String,
     protected val connectionConstructor: (String, Int) -> Connection = ::TcpFullConnection,
     protected val plaintextEncoder: MTProtoEncoder = PlaintextMTProtoEncoder(MTProtoStateImpl()),
@@ -98,7 +98,7 @@ open class TelegramClientImpl(
     protected var updatesHandler: UpdateHandler? = null
     protected val activeTasks = mutableListOf<Job>()
 
-    override val updateCallbacks = mutableListOf<suspend (UpdateOrSkipped) -> Unit>()
+    override var updateCallbacks = listOf<suspend (UpdateOrSkipped) -> Unit>()
 
     override suspend fun connect() {
         session.updates?.let {
@@ -106,12 +106,12 @@ open class TelegramClientImpl(
         }
         connectionConstructor(session.ipAddress, session.port).let {
             it.connect()
-            this@TelegramClientImpl.connection = it
+            this@TelegramClientCoreImpl.connection = it
             if (session.state?.authKey == null)
                 session = session.setState(
                     MTProtoStateImpl(
                         authenticate(
-                            this@TelegramClientImpl,
+                            this@TelegramClientCoreImpl,
                             plaintextEncoder
                         )
                     ).also { state ->
@@ -175,8 +175,11 @@ open class TelegramClientImpl(
         updatesHandler = UpdateHandlerImpl(session.updates!!, this)
         activeTasks += GlobalScope.launch {
             while (true) {
-                val update = updatesHandler!!.updates.receive()
-                updateCallbacks.forEach { it(update) }
+                coroutineScope {
+                    val update = updatesHandler!!.updates.receive()
+                    println(this@TelegramClientCoreImpl.updateCallbacks)
+                    this@TelegramClientCoreImpl.updateCallbacks.forEach { launch { it(update) } }
+                }
             }
         }
         return loggedIn to ret
@@ -253,10 +256,10 @@ open class TelegramClientImpl(
         return inputUserSelf
     }
 
-    override fun getAccessHash(constructor: ObjectType, peerId: Int): Long? =
+    override suspend fun getAccessHash(constructor: ObjectType, peerId: Int): Long? =
         getAccessHash(constructor, peerId.toLong())
 
-    override fun getAccessHash(constructor: ObjectType, peerId: Long): Long? =
+    override suspend fun getAccessHash(constructor: ObjectType, peerId: Long): Long? =
         session.entities[constructor.name]?.get(peerId)
 
     override suspend fun catchUp() = updatesHandler!!.catchUp()

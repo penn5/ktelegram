@@ -23,7 +23,7 @@ import com.github.aakira.napier.Napier
 import kotlinx.coroutines.debug.DebugProbes
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
-import tk.hack5.telekat.core.client.TelegramClientImpl
+import tk.hack5.telekat.core.client.TelegramClientCoreImpl
 import tk.hack5.telekat.core.state.JsonSession
 import tk.hack5.telekat.core.state.invoke
 import java.io.File
@@ -36,7 +36,11 @@ private fun main() {
 
 private fun amain() = runBlocking {
     val client =
-        TelegramClientImpl("596386", "e142e0a65a50b707fa539ac91db2de16", session = JsonSession(File("telekat.json")))
+        TelegramClientCoreImpl(
+            "596386",
+            "e142e0a65a50b707fa539ac91db2de16",
+            session = JsonSession(File("telekat.json"))
+        )
     client.updateCallbacks += {
         println("new update!!!!")
         println(it)

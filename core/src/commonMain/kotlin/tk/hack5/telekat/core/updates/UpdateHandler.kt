@@ -348,8 +348,8 @@ open class UpdateHandlerImpl(
             }
         }
 
-        val (applicableSeq, job) = act {
-            val applicableSeq = updates.seq?.minus(1)
+        val (localSeq, applicableSeq, job) = act {
+            val applicableSeq = updates.seqStart?.minus(1)
             val localSeq = updateState.seq
             val job = when {
                 applicableSeq == null || applicableSeq == -1 -> {
@@ -377,10 +377,10 @@ open class UpdateHandlerImpl(
                     job
                 }
             }
-            Pair(applicableSeq, job)
+            Triple(localSeq, applicableSeq, job)
         }
         job?.let {
-            Napier.d("Waiting for update with seq=$applicableSeq", tag = tag)
+            Napier.d("Waiting for update with seq=$applicableSeq (current=$localSeq, updates=$updates)", tag = tag)
             val join = withTimeoutOrNull(500) {
                 it.join()
             }
@@ -529,7 +529,7 @@ open class UpdateHandlerImpl(
         } + newEncryptedMessages.map { UpdateNewEncryptedMessageObject(it, 0) }
 
 
-    val UpdatesType.date
+    private val UpdatesType.date
         get() = when (this) {
             is UpdateShortMessageObject -> date
             is UpdateShortChatMessageObject -> date
@@ -539,9 +539,15 @@ open class UpdateHandlerImpl(
             is UpdateShortSentMessageObject -> date
             else -> null
         }
-    val UpdatesType.seq
+    private val UpdatesType.seq
         get() = when (this) {
             is UpdatesCombinedObject -> seq
+            is UpdatesObject -> seq
+            else -> null
+        }
+    private val UpdatesType.seqStart
+        get() = when (this) {
+            is UpdatesCombinedObject -> seqStart
             is UpdatesObject -> seq
             else -> null
         }

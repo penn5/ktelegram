@@ -27,13 +27,13 @@ val PeerType.id
         is PeerChannelObject -> channelId
     }
 
-sealed class Peer(val id: Int, val fullName: String, val inputPeer: InputPeerType)
+sealed class Peer(val id: Int, val inputPeer: InputPeerType)
 
 data class PeerUser(val user: UserObject) :
-    Peer(user.id, user.firstName + (user.lastName?.let { " $it" } ?: ""), user.toInputPeer())
+    Peer(user.id, user.toInputPeer())
 
-data class PeerChat(val chat: ChatObject) : Peer(chat.id, chat.title, chat.toInputPeer())
-data class PeerChannel(val channel: ChannelObject) : Peer(channel.id, channel.title, channel.toInputPeer())
+data class PeerChat(val chat: ChatObject) : Peer(chat.id, chat.toInputPeer())
+data class PeerChannel(val channel: ChannelObject) : Peer(channel.id, channel.toInputPeer())
 
 fun UserObject.toPeer() = PeerUser(this)
 fun ChatObject.toPeer() = PeerChat(this)

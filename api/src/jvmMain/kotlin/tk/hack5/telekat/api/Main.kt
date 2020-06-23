@@ -23,12 +23,8 @@ import com.github.aakira.napier.Napier
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
-import tk.hack5.telekat.core.client.TelegramClientImpl
 import tk.hack5.telekat.core.state.JsonSession
 import tk.hack5.telekat.core.state.invoke
-import tk.hack5.telekat.core.tl.MessageObject
-import tk.hack5.telekat.core.tl.PeerChannelObject
-import tk.hack5.telekat.core.tl.UpdateNewChannelMessageObject
 import java.io.File
 
 @ExperimentalCoroutinesApi
@@ -36,14 +32,13 @@ fun main(): Unit = runBlocking {
     //DebugProbes.install()
     Napier.base(DebugAntilog())
     val client =
-        TelegramClientImpl(
+        TelegramClientApiImpl(
             "596386",
             "e142e0a65a50b707fa539ac91db2de16",
             session = JsonSession(File("telekat.json")),
             maxFloodWait = 15
         )
-    println(client.updateCallbacks)
-    client.updateCallbacks += { or ->
+    /*client.updateCallbacks += { or ->
         or.update?.let {
             println(it)
             val peer = (((it as? UpdateNewChannelMessageObject)?.message as? MessageObject)?.toId as? PeerChannelObject)
@@ -57,9 +52,19 @@ fun main(): Unit = runBlocking {
                     peer.toInputPeer(client)!!,
                     "testing! sorry for any spam i do, its automated and i can't stop it for 60 seconds"
                 )
+
+        }
+    }*/
+    client.eventCallbacks += {
+        println(it)
+        when (it) {
+            is NewMessage.NewMessageEvent -> println(it)
+            is EditMessage.EditMessageEvent -> println(it)
+            is RawUpdate.RawUpdateEvent -> println(it)
         }
     }
-    println(client.updateCallbacks)
+    //println(client.eventCallbacks)
+    //println(client.updateCallbacks)
     println(client.start(
         phoneNumber = {
             print("Phone Number: ")

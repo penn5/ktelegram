@@ -23,15 +23,21 @@ import tk.hack5.telekat.core.tl.*
 import tk.hack5.telekat.core.updates.ObjectType
 
 fun ChannelObject.toInputPeer(): InputPeerChannelObject = InputPeerChannelObject(id, accessHash!!)
-fun PeerChannelObject.toInputPeer(client: TelegramClient): InputPeerChannelObject? {
+suspend fun PeerChannelObject.toInputPeer(client: TelegramClient): InputPeerChannelObject? {
     return InputPeerChannelObject(id, client.getAccessHash(ObjectType.CHANNEL, id) ?: return null)
 }
 
 fun ChatObject.toInputPeer(): InputPeerChatObject = InputPeerChatObject(id)
 fun PeerChatObject.toInputPeer(): InputPeerChatObject = InputPeerChatObject(chatId)
 fun UserObject.toInputPeer(): InputPeerUserObject = InputPeerUserObject(id, accessHash!!)
-fun PeerUserObject.toInputPeer(client: TelegramClient): InputPeerUserObject? {
+suspend fun PeerUserObject.toInputPeer(client: TelegramClient): InputPeerUserObject? {
     return InputPeerUserObject(id, client.getAccessHash(ObjectType.USER, id) ?: return null)
+}
+
+suspend fun PeerType.toInputPeer(client: TelegramClient): InputPeerType? = when (this) {
+    is PeerUserObject -> toInputPeer(client)
+    is PeerChatObject -> toInputPeer()
+    is PeerChannelObject -> toInputPeer(client)
 }
 
 fun Messages_DialogsType.getInputPeer(dialog: DialogObject): InputPeerType {
@@ -50,3 +56,5 @@ fun Messages_DialogsType.getInputPeer(dialog: DialogObject): InputPeerType {
         is Messages_DialogsNotModifiedObject -> TODO("dialogs caching")
     }
 }
+
+fun InputPeerUserObject.toInputUser() = InputUserObject(userId, accessHash)
