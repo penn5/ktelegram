@@ -364,6 +364,7 @@ open class UpdateHandlerImpl(
                         dispatchUpdate(update)
                     }
                     updateState.seq = updates.seq!!
+                    updates.date?.let { checkDate(it) }
                     null
                 }
                 applicableSeq < localSeq -> {

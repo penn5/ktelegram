@@ -19,12 +19,24 @@
 package tk.hack5.telekat.api
 
 import tk.hack5.telekat.core.client.TelegramClient
-import tk.hack5.telekat.core.tl.InputPeerType
-import tk.hack5.telekat.core.tl.PeerType
+import tk.hack5.telekat.core.tl.*
 
 interface ChatGetter {
-    val chat: PeerType
+    val chatPeer: PeerType
     val client: TelegramClient
 
-    suspend fun getInputChat(): InputPeerType = chat.toInputPeer(client)!!
+    suspend fun getChat(): Peer = chatPeer.let {
+        when (it) {
+            is PeerUserObject -> PeerUser(client(Users_GetUsersRequest(
+                listOf(InputUserObject(it.userId, it.toInputPeer(client)!!.accessHash))
+            )).single() as UserObject)
+            is PeerChatObject -> PeerChat((client(Messages_GetChatsRequest(
+                listOf(it.chatId)
+            )) as Messages_ChatsObject).chats.single() as ChatObject)
+            is PeerChannelObject -> PeerChannel((client(Channels_GetChannelsRequest(
+                listOf(InputChannelObject(it.channelId, it.toInputPeer(client)!!.accessHash))
+            )) as Messages_ChatsObject).chats.single() as ChannelObject)
+        }
+    }
+    suspend fun getInputChat(): InputPeerType = chatPeer.toInputPeer(client)!!
 }

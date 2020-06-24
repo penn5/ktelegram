@@ -33,8 +33,8 @@ interface EventHandler<E : Event> {
         is Skipped -> constructEvent(client, update.channelId)
     }
 
-    fun constructEvent(client: TelegramClient, update: UpdateType): E? = throw NotImplementedError()
-    fun constructEvent(client: TelegramClient, channelId: Int?): E? = throw NotImplementedError()
+    fun constructEvent(client: TelegramClient, update: UpdateType): E? = null
+    fun constructEvent(client: TelegramClient, channelId: Int?): E? = null
 
     companion object {
         val defaultHandlers = listOf(
@@ -76,7 +76,7 @@ object NewMessage : EventHandler<NewMessage.NewMessageEvent> {
         val restrictionReason: List<RestrictionReasonType>
     ) : Event, SenderGetter, ChatGetter {
         override val senderId: Int? get() = fromId
-        override val chat: PeerType
+        override val chatPeer: PeerType
             get() = when (toId) {
                 is PeerUserObject -> {
                     if (out) toId else PeerUserObject(fromId!!)
@@ -194,7 +194,7 @@ object EditMessage : EventHandler<EditMessage.EditMessageEvent> {
         val restrictionReason: List<RestrictionReasonType>
     ) : Event, SenderGetter, ChatGetter {
         override val senderId: Int? get() = fromId
-        override val chat: PeerType
+        override val chatPeer: PeerType
             get() = when (toId) {
                 is PeerUserObject -> {
                     if (out) toId else PeerUserObject(fromId!!)

@@ -58,7 +58,13 @@ fun main(): Unit = runBlocking {
     client.eventCallbacks += {
         println(it)
         when (it) {
-            is NewMessage.NewMessageEvent -> println(it)
+            is NewMessage.NewMessageEvent -> {
+                it.getChat().let { chat ->
+                    if (chat is PeerUser && !chat.user.bot && chat.user.firstName == "hackintosh5") {
+                        client.sendMessage(it.getInputChat(), "sorry for any spam, i'm testing my userbot.")
+                    }
+                }
+            }
             is EditMessage.EditMessageEvent -> println(it)
             is RawUpdate.RawUpdateEvent -> println(it)
         }

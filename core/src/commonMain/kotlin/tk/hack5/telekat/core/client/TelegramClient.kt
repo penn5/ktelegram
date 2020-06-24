@@ -314,10 +314,6 @@ open class TelegramClientCoreImpl(
     }
 
     override suspend operator fun <N, R : TLObject<N>> invoke(request: TLMethod<R>): N {
-        try {
-            return sendAndUnpack(request).native
-        } catch (e: Throwable) {
-            throw e // Needed to preserve stack traces on buggy coroutines impl
-        }
+        return sendAndUnpack(request).native
     }
 }
