@@ -24,12 +24,12 @@ import tk.hack5.telekat.core.tl.TLObject
 
 abstract class MTProtoEncoder(val state: MTProtoState) {
     abstract suspend fun encode(data: ByteArray): ByteArray
-    abstract fun decode(data: ByteArray): ByteArray
+    abstract suspend fun decode(data: ByteArray): ByteArray
 }
 
 abstract class MTProtoEncoderWrapped(state: MTProtoState) : MTProtoEncoder(state) {
     abstract suspend fun encodeMessage(data: MessageObject): ByteArray
-    abstract fun decodeMessage(data: ByteArray): MessageObject
+    abstract suspend fun decodeMessage(data: ByteArray): MessageObject
 
     abstract suspend fun wrapAndEncode(data: TLObject<*>, isContentRelated: Boolean = true): Pair<ByteArray, Long>
 }

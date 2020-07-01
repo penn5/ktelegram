@@ -21,6 +21,7 @@ package tk.hack5.telekat.api
 import com.github.aakira.napier.DebugAntilog
 import com.github.aakira.napier.Napier
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.debug.DebugProbes
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import tk.hack5.telekat.core.state.JsonSession
@@ -30,15 +31,16 @@ import java.io.File
 
 @ExperimentalCoroutinesApi
 fun main(): Unit = runBlocking {
-    /*DebugProbes.install()
-    */Napier.base(DebugAntilog())
+    DebugProbes.install()
+    System.setProperty("java.util.logging.SimpleFormatter.format", "[%1\$tT.%1\$tL] [%4$-7s] %5\$s %n")
+    Napier.base(DebugAntilog())
     val client =
         TelegramClientApiImpl(
             "596386",
             "e142e0a65a50b707fa539ac91db2de16",
             session = JsonSession(File("telekat.json")),
             maxFloodWait = 15,
-            scope = this
+            parentScope = this
         )
     /*client.updateCallbacks += { or ->
         or.update?.let {

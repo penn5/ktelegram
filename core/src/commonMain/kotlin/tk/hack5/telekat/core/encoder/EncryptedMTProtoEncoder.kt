@@ -18,6 +18,7 @@
 
 package tk.hack5.telekat.core.encoder
 
+import com.github.aakira.napier.Napier
 import com.soywiz.krypto.sha256
 import tk.hack5.telekat.core.crypto.AES
 import tk.hack5.telekat.core.crypto.AESMode
@@ -59,13 +60,14 @@ open class EncryptedMTProtoEncoder(
 
     override suspend fun encodeMessage(data: MessageObject): ByteArray = encode(data.toTlRepr().toByteArray())
     override suspend fun wrapAndEncode(data: TLObject<*>, isContentRelated: Boolean): Pair<ByteArray, Long> {
-        val seq = (if (isContentRelated) state.seq++ else state.seq) * 2 + if (isContentRelated) 1 else 0
+        val seq =
+            (if (isContentRelated) state.act { state.seq++ } else state.act { state.seq }) * 2 + if (isContentRelated) 1 else 0
         val encoded = data.toTlRepr().toByteArray()
         val msgId = state.getMsgId()
         return Pair(encodeMessage(MessageObject(msgId, seq, encoded.size, ObjectObject(data), bare = true)), msgId)
     }
 
-    override fun decode(data: ByteArray): ByteArray {
+    override suspend fun decode(data: ByteArray): ByteArray {
         require(data.size >= 8) { "Data too small" }
         require(data.sliceArray(0 until 8).contentEquals(authKeyId)) { "Invalid authKeyId" }
         val msgKey = data.sliceArray(8 until 24)
@@ -78,12 +80,18 @@ open class EncryptedMTProtoEncoder(
             )
         ) { "Invalid msgKey" }
         // TODO implement future salt support so we can verify its a valid salt, and handle it right if its wrong
-        require(decrypted.sliceArray(0 until 8).contentEquals(state.salt) || state.salt.all { it == 0.toByte() }) { "Invalid salt" }
+        require(
+            decrypted.sliceArray(0 until 8)
+                .contentEquals(state.salt) || state.salt.all { it == 0.toByte() }) { "Invalid salt" }
         require(decrypted.sliceArray(8 until 16).contentEquals(state.sessionId)) { "Invalid sessionId" }
         // We cannot validate the msgId yet if there's a container because the container contents will be lower
         return decrypted.sliceArray(16 until decrypted.size)
     }
 
-    override fun decodeMessage(data: ByteArray): MessageObject =
-        MessageObject.fromTlRepr(decode(data).toIntArray(), bare = true)!!.second
+    override suspend fun decodeMessage(data: ByteArray): MessageObject {
+        Napier.d("Decoding incoming message from network...")
+        val ret = MessageObject.fromTlRepr(decode(data).toIntArray(), bare = true)!!.second
+        Napier.d("Decoded message")
+        return ret
+    }
 }

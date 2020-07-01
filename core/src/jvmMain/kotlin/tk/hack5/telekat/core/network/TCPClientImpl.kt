@@ -22,6 +22,7 @@ import io.ktor.network.selector.ActorSelectorManager
 import io.ktor.network.sockets.*
 import io.ktor.util.KtorExperimentalAPI
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.io.ByteReadChannel
 import kotlinx.coroutines.io.ByteWriteChannel
 import java.net.InetSocketAddress
@@ -46,14 +47,16 @@ actual class TCPClientImpl actual constructor(
         writeChannel = socket.openWriteChannel()
     }
 
+    @KtorExperimentalAPI
     override suspend fun close() {
         readChannel?.cancel(null)
         readChannel = null
         writeChannel?.close(null)
         writeChannel = null
         socket.awaitClosed()
+        actor.close()
     }
 
     @KtorExperimentalAPI
-    val actor = ActorSelectorManager(scope.coroutineContext)
+    val actor = ActorSelectorManager(scope.coroutineContext + Dispatchers.IO)
 }

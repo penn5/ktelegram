@@ -77,8 +77,13 @@ abstract class TelegramClient {
 
 open class TelegramClientCoreImpl(
     protected val apiId: String, protected val apiHash: String,
+    protected val parentScope: CoroutineScope = GlobalScope,
     protected val connectionConstructor: (CoroutineScope, String, Int) -> Connection = ::TcpFullConnection,
-    protected val plaintextEncoder: MTProtoEncoder = PlaintextMTProtoEncoder(MTProtoStateImpl()),
+    protected val plaintextEncoderConstructor: (CoroutineScope) -> MTProtoEncoder = {
+        PlaintextMTProtoEncoder(
+            MTProtoStateImpl()
+        ).apply { state.scope = it }
+    },
     protected val encryptedEncoderConstructor: (MTProtoState) -> EncryptedMTProtoEncoder = { EncryptedMTProtoEncoder(it) },
     protected val deviceModel: String = "ktg",
     protected val systemVersion: String = "0.0.1",
@@ -87,8 +92,7 @@ open class TelegramClientCoreImpl(
     protected val langPack: String = "",
     protected val langCode: String = "en",
     protected var session: Session<*> = MemorySession(),
-    protected val maxFloodWait: Int = 0,
-    protected val parentScope: CoroutineScope = GlobalScope
+    protected val maxFloodWait: Int = 0
 ) : TelegramClient() {
     override var secureRandom = SecureRandom()
     protected var connection: Connection? = null
@@ -102,6 +106,10 @@ open class TelegramClientCoreImpl(
 
     override var updateCallbacks = listOf<suspend (UpdateOrSkipped) -> Unit>()
 
+    init {
+        session.state?.scope = scope
+    }
+
     override suspend fun connect() {
         session.updates?.let {
             updatesHandler = UpdateHandlerImpl(scope, it, this)
@@ -114,9 +122,10 @@ open class TelegramClientCoreImpl(
                     MTProtoStateImpl(
                         authenticate(
                             this@TelegramClientCoreImpl,
-                            plaintextEncoder
+                            plaintextEncoderConstructor(scope)
                         )
                     ).also { state ->
+                        state.scope = scope
                         encoder = encryptedEncoderConstructor(state)
                         unpacker = MessagePackerUnpacker(it, encoder!!, state, updatesChannel)
                     })
@@ -129,7 +138,7 @@ open class TelegramClientCoreImpl(
                 startRecvLoop()
             }
 
-            this(Help_GetNearestDcRequest()) // First request has to be an unchanged request from the first layer
+            Napier.d(this(Help_GetNearestDcRequest()).toString()) // First request has to be an unchanged request from the first layer
             serverConfig = this(
                 InvokeWithLayerRequest(
                     105,
@@ -146,18 +155,17 @@ open class TelegramClientCoreImpl(
                     )
                 )
             ) as ConfigObject
+            Napier.d(serverConfig.toString())
         }
     }
 
     override suspend fun disconnect() {
-        updatesHandler?.updates?.close()
         session.save()
         connection?.disconnect()
         connection = null
-        println(scope)
         scope.coroutineContext[Job]!!.cancelAndJoin()
+        updatesHandler?.updates?.close()
         scope = CoroutineScope(parentScope.coroutineContext + SupervisorJob(parentScope.coroutineContext[Job]!!))
-        println(scope)
     }
 
     override suspend fun start(
@@ -188,7 +196,12 @@ open class TelegramClientCoreImpl(
         return loggedIn to ret
     }
 
-    override suspend fun sendUpdate(update: UpdatesType) = updatesHandler!!.handleUpdates(update)
+    override suspend fun sendUpdate(update: UpdatesType) {
+        scope.launch {
+            updatesHandler!!.handleUpdates(update)
+        }
+        Unit
+    }
 
     protected suspend fun logIn(
         phoneNumber: () -> String,

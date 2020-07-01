@@ -134,7 +134,7 @@ abstract class BaseActor(
         }
         require(acceptingTasks) { "The Actor must be accepting tasks" }
         val result = CompletableDeferred<R>()
-        tasks.send(RemoteFunction(block, result))
+        check(tasks.offer(RemoteFunction(block, result))) { "Failed to offer request" }
         return result.await()
     }
 
@@ -183,7 +183,7 @@ abstract class BaseActor(
  * An actor that can be used without any subclassing or inheritance
  */
 class GenericActor(
-    scope: CoroutineScope = GlobalScope,
+    scope: CoroutineScope,
     start: CoroutineStart = CoroutineStart.LAZY,
     concurrency: Int = 1
 ) : BaseActor(scope, start, concurrency) {

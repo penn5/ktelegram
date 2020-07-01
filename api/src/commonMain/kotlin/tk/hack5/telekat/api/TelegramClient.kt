@@ -33,14 +33,16 @@ import tk.hack5.telekat.core.state.MemorySession
 import tk.hack5.telekat.core.state.Session
 import tk.hack5.telekat.core.updates.UpdateOrSkipped
 
-class TelegramClientApiImpl(
-    apiId: String,
-    apiHash: String,
+open class TelegramClientApiImpl(
+    apiId: String, apiHash: String,
+    parentScope: CoroutineScope = GlobalScope,
     connectionConstructor: (CoroutineScope, String, Int) -> Connection = ::TcpFullConnection,
-    plaintextEncoder: MTProtoEncoder = PlaintextMTProtoEncoder(MTProtoStateImpl()),
-    encryptedEncoderConstructor: (MTProtoState) -> EncryptedMTProtoEncoder = {
-        EncryptedMTProtoEncoder(it)
+    plaintextEncoderConstructor: (CoroutineScope) -> MTProtoEncoder = {
+        PlaintextMTProtoEncoder(MTProtoStateImpl()).apply {
+            state.scope = it
+        }
     },
+    encryptedEncoderConstructor: (MTProtoState) -> EncryptedMTProtoEncoder = { EncryptedMTProtoEncoder(it) },
     deviceModel: String = "ktg",
     systemVersion: String = "0.0.1",
     appVersion: String = "0.0.1",
@@ -48,13 +50,12 @@ class TelegramClientApiImpl(
     langPack: String = "",
     langCode: String = "en",
     session: Session<*> = MemorySession(),
-    maxFloodWait: Int = 0,
-    scope: CoroutineScope = GlobalScope
+    maxFloodWait: Int = 0
 ) : TelegramClientCoreImpl(
-    apiId,
-    apiHash,
+    apiId, apiHash,
+    parentScope,
     connectionConstructor,
-    plaintextEncoder,
+    plaintextEncoderConstructor,
     encryptedEncoderConstructor,
     deviceModel,
     systemVersion,
@@ -63,8 +64,7 @@ class TelegramClientApiImpl(
     langPack,
     langCode,
     session,
-    maxFloodWait,
-    scope
+    maxFloodWait
 ) {
 
     protected val handleUpdate: suspend (UpdateOrSkipped) -> Unit = handleUpdate@{
@@ -79,14 +79,10 @@ class TelegramClientApiImpl(
         }
     }
 
-    override var updateCallbacks: List<suspend (UpdateOrSkipped) -> Unit> = emptyList()
+    override var updateCallbacks: List<suspend (UpdateOrSkipped) -> Unit> = listOf(handleUpdate)
         set(value) {
             field = if (value.contains(handleUpdate)) value else value + handleUpdate
         }
-
-    init {
-        updateCallbacks = listOf()
-    }
 
     var eventCallbacks: List<suspend (Event) -> Unit> = listOf()
 }

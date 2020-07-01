@@ -55,8 +55,7 @@ class MessagePackerUnpacker(
         while (true) {
             try {
                 val b = input.receive()
-                val d = encoder.decode(b)
-                val m = MessageObject.fromTlRepr(d.toIntArray(), bare = true)!!.second
+                val m = encoder.decodeMessage(b)
                 state.updateSeqNo(m.seqno)
                 unpackMessage(m)
             } catch (e: CancellationException) {
@@ -69,9 +68,9 @@ class MessagePackerUnpacker(
 
     private suspend fun unpackMessage(message: TLObject<*>, msgId: Long? = null) {
         try {
-            if (message is MessageObject) {
+            if (message is MessageObject)
                 return unpackMessage(message.body, message.msgId)
-            } else
+            else
                 state.updateMsgId(msgId!!)
             when (message) {
                 is ObjectType -> {
@@ -80,7 +79,9 @@ class MessagePackerUnpacker(
                 is BadServerSaltObject -> {
                     // Fix the salt and retry the message
                     Napier.d("Bad server salt, corrected to ${message.newServerSalt}", tag = tag)
-                    state.salt = message.newServerSalt.asTlObject().toTlRepr().toByteArray()
+                    state.act {
+                        state.salt = message.newServerSalt.asTlObject().toTlRepr().toByteArray()
+                    }
                     pendingMessages.getValue(message.badMsgId).complete(MessageUnpackActionRetry)
                 }
                 is NewSessionCreatedObject -> return // We don't care about new sessions, AFAIK
@@ -107,8 +108,12 @@ class MessagePackerUnpacker(
                         20 -> {
                             Napier.d("Server complains message too old", tag = tag)
                         } // Just re-send it
-                        32 -> state.seq += 16
-                        33 -> state.seq -= 16
+                        32 -> state.act {
+                            state.seq += 16
+                        }
+                        33 -> state.act {
+                            state.seq -= 16
+                        }
                         in 34..35 -> error("Server says relevancy incorrect")
                         48 -> {
                             Napier.e("BadMsgNotification related to bad server salt ignored", tag = tag)

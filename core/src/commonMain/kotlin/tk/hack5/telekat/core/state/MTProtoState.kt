@@ -21,13 +21,13 @@ package tk.hack5.telekat.core.state
 import com.github.aakira.napier.Napier
 import com.soywiz.klock.DateTime
 import com.soywiz.klock.seconds
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 import tk.hack5.telekat.core.crypto.AuthKey
 import tk.hack5.telekat.core.tl.asTlObject
 import tk.hack5.telekat.core.tl.toByteArray
+import tk.hack5.telekat.core.utils.GenericActor
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 import kotlin.random.Random
@@ -43,14 +43,17 @@ interface MTProtoState {
     var remoteContentRelatedSeq: Int
     var lastMsgId: Long
 
+    var scope: CoroutineScope
+    val act: GenericActor
+
 
     suspend fun getMsgId(): Long
-    fun validateMsgId(id: Long): Boolean
+    suspend fun validateMsgId(id: Long): Boolean
 
     suspend fun updateTimeOffset(seconds: Int)
     suspend fun updateTimeOffset(msgId: Long)
 
-    fun updateMsgId(msgId: Long)
+    suspend fun updateMsgId(msgId: Long)
     suspend fun updateSeqNo(seq: Int)
 }
 
@@ -58,16 +61,26 @@ interface MTProtoState {
 data class MTProtoStateImpl(override val authKey: AuthKey? = null) : MTProtoState {
     @Transient
     override var timeOffset = 0L
+
     @Transient
     override var salt = 0L.asTlObject().toTlRepr().toByteArray()
     override val sessionId = Random.nextLong().asTlObject().toTlRepr().toByteArray()
+
     @Transient
     override var seq = 0
+
     @Transient
     override var remoteContentRelatedSeq = -1
     override var lastMsgId = 0L
+
+    override var scope: CoroutineScope
+        get() = error("Can't retrieve scope")
+        set(value) {
+            act = GenericActor(value)
+        }
+
     @Transient
-    private val lock = Mutex()
+    override lateinit var act: GenericActor
 
     @ExperimentalUnsignedTypes
     override suspend fun getMsgId(): Long {
@@ -78,7 +91,7 @@ data class MTProtoStateImpl(override val authKey: AuthKey? = null) : MTProtoStat
         val nanoseconds = sinceSecond.nanoseconds.roundToInt()
         val secs = secsSinceEpoch + timeOffset
         var newMsgId = secs.shl(32).or(nanoseconds.toLong().shl(2))
-        lock.withLock {
+        act {
             while (newMsgId <= lastMsgId)
                 newMsgId = lastMsgId + 4
             lastMsgId = newMsgId
@@ -88,7 +101,7 @@ data class MTProtoStateImpl(override val authKey: AuthKey? = null) : MTProtoStat
     }
 
     @ExperimentalUnsignedTypes
-    override fun validateMsgId(id: Long): Boolean {
+    override suspend fun validateMsgId(id: Long): Boolean {
         val now = DateTime.now()
         val sinceEpoch = now - DateTime.EPOCH
         val serverTime = id.toULong().shr(32)
@@ -97,23 +110,19 @@ data class MTProtoStateImpl(override val authKey: AuthKey? = null) : MTProtoStat
         return true
     }
 
-    override suspend fun updateSeqNo(seq: Int) {
+    override suspend fun updateSeqNo(seq: Int) = act {
         require(seq / 2 >= remoteContentRelatedSeq) { "seqno was reduced by the server ($seq < 2*$remoteContentRelatedSeq)" }
         if (seq.rem(2) == 1) {
             // Content related
-            lock.withLock {
-                remoteContentRelatedSeq++
-            }
+            remoteContentRelatedSeq++
         }
     }
 
-    override suspend fun updateTimeOffset(seconds: Int) {
-        lock.withLock {
-            val now = DateTime.now() - DateTime.EPOCH
-            val oldOffset = timeOffset
-            timeOffset = seconds - now.seconds.roundToLong()
-            Napier.d("Updating timeOffset to $timeOffset (was $oldOffset, t=$now, c=$seconds)", tag = tag)
-        }
+    override suspend fun updateTimeOffset(seconds: Int) = act {
+        val now = DateTime.now() - DateTime.EPOCH
+        val oldOffset = timeOffset
+        timeOffset = seconds - now.seconds.roundToLong()
+        Napier.d("Updating timeOffset to $timeOffset (was $oldOffset, t=$now, c=$seconds)", tag = tag)
     }
 
     override suspend fun updateTimeOffset(msgId: Long) {
@@ -121,6 +130,6 @@ data class MTProtoStateImpl(override val authKey: AuthKey? = null) : MTProtoStat
     }
 
     @ExperimentalUnsignedTypes
-    override fun updateMsgId(msgId: Long) =
-        require(validateMsgId(msgId)) { "msg_id was reduced by the server ($msgId)" }
+    override suspend fun updateMsgId(msgId: Long) =
+        check(validateMsgId(msgId)) { "msg_id from server incorrect ($msgId)" }
 }
