@@ -112,7 +112,7 @@ data class MTProtoStateImpl(override val authKey: AuthKey? = null) : MTProtoStat
             val now = DateTime.now() - DateTime.EPOCH
             val oldOffset = timeOffset
             timeOffset = seconds - now.seconds.roundToLong()
-            Napier.d("Updating timeOffset to $$timeOffset (was $oldOffset, t=$now, c=$seconds)", tag = tag)
+            Napier.d("Updating timeOffset to $timeOffset (was $oldOffset, t=$now, c=$seconds)", tag = tag)
         }
     }
 

@@ -18,6 +18,9 @@
 
 package tk.hack5.telekat.api
 
+import com.github.aakira.napier.Napier
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.GlobalScope
 import tk.hack5.telekat.core.client.TelegramClientCoreImpl
 import tk.hack5.telekat.core.connection.Connection
 import tk.hack5.telekat.core.connection.TcpFullConnection
@@ -33,7 +36,7 @@ import tk.hack5.telekat.core.updates.UpdateOrSkipped
 class TelegramClientApiImpl(
     apiId: String,
     apiHash: String,
-    connectionConstructor: (String, Int) -> Connection = ::TcpFullConnection,
+    connectionConstructor: (CoroutineScope, String, Int) -> Connection = ::TcpFullConnection,
     plaintextEncoder: MTProtoEncoder = PlaintextMTProtoEncoder(MTProtoStateImpl()),
     encryptedEncoderConstructor: (MTProtoState) -> EncryptedMTProtoEncoder = {
         EncryptedMTProtoEncoder(it)
@@ -45,7 +48,8 @@ class TelegramClientApiImpl(
     langPack: String = "",
     langCode: String = "en",
     session: Session<*> = MemorySession(),
-    maxFloodWait: Int = 0
+    maxFloodWait: Int = 0,
+    scope: CoroutineScope = GlobalScope
 ) : TelegramClientCoreImpl(
     apiId,
     apiHash,
@@ -59,7 +63,8 @@ class TelegramClientApiImpl(
     langPack,
     langCode,
     session,
-    maxFloodWait
+    maxFloodWait,
+    scope
 ) {
 
     protected val handleUpdate: suspend (UpdateOrSkipped) -> Unit = handleUpdate@{
@@ -68,7 +73,7 @@ class TelegramClientApiImpl(
                 eventCallbacks.forEach { callback ->
                     callback(event)
                 }
-                println("dispatched!")
+                Napier.d("dispatched!")
                 return@handleUpdate
             }
         }
@@ -81,8 +86,6 @@ class TelegramClientApiImpl(
 
     init {
         updateCallbacks = listOf()
-        println(super.updateCallbacks)
-        println(updateCallbacks)
     }
 
     var eventCallbacks: List<suspend (Event) -> Unit> = listOf()

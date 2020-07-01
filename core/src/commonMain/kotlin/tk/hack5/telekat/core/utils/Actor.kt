@@ -94,7 +94,7 @@ enum class ActorState {
  * @param concurrency The number of workers, defaulting to one worker (which should be used when data is mutable
  */
 abstract class BaseActor(
-    private val scope: CoroutineScope = GlobalScope,
+    private val scope: CoroutineScope,
     private val start: CoroutineStart? = CoroutineStart.LAZY,
     private val concurrency: Int = 1
 ) : Actor {

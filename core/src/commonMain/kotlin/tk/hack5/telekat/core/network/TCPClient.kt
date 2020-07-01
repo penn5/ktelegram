@@ -18,6 +18,7 @@
 
 package tk.hack5.telekat.core.network
 
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.io.ByteReadChannel
 import kotlinx.coroutines.io.ByteWriteChannel
 
@@ -33,4 +34,4 @@ abstract class TCPClient protected constructor(targetAddress: String, targetPort
     abstract suspend fun close()
 }
 
-expect class TCPClientImpl(targetAddress: String, targetPort: Int) : TCPClient
+expect class TCPClientImpl(scope: CoroutineScope, targetAddress: String, targetPort: Int) : TCPClient

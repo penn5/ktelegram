@@ -20,6 +20,7 @@ package tk.hack5.telekat.core.updates
 
 import com.github.aakira.napier.Napier
 import kotlinx.coroutines.CompletableJob
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withTimeoutOrNull
@@ -212,11 +213,12 @@ interface UpdateHandler {
 }
 
 open class UpdateHandlerImpl(
+    scope: CoroutineScope,
     protected val updateState: UpdateState,
     val client: TelegramClient,
     protected val maxDifference: Int? = null,
     val maxChannelDifference: Int = 100
-) : BaseActor(), UpdateHandler {
+) : BaseActor(scope), UpdateHandler {
     val pendingUpdatesSeq = mutableMapOf<Int, CompletableJob>()
     val pendingUpdatesPts = mutableMapOf<Pair<Int?, Int>, CompletableJob>()
 
@@ -228,68 +230,86 @@ open class UpdateHandlerImpl(
 
     override suspend fun getEntities(update: TLObject<*>) = AccessHashGetter().walk(update)!!
 
-    suspend fun handleUpdates(updates: UpdatesType) {
+    protected suspend fun handleUpdates(
+        updates: UpdatesType,
+        skipChecks: Boolean = false,
+        skipDispatch: Boolean = false
+    ) {
+        Napier.d({ "got updates $updates" }, tag = tag)
+        var refetch: Int? = null
         val innerUpdates = when (updates) {
             is UpdatesTooLongObject -> {
                 fetchUpdates()
                 return
             }
-            is UpdateShortMessageObject -> listOf(
-                UpdateNewMessageObject(
-                    MessageObject(
-                        out = updates.out,
-                        mentioned = updates.mentioned,
-                        mediaUnread = updates.mediaUnread,
-                        silent = updates.silent,
-                        post = false,
-                        fromScheduled = false,
-                        legacy = false,
-                        editHide = false,
-                        id = updates.id,
-                        fromId = if (updates.out) client.getInputMe().userId else updates.userId,
-                        toId = PeerUserObject(if (updates.out) updates.userId else client.getInputMe().userId),
-                        fwdFrom = updates.fwdFrom,
-                        viaBotId = updates.viaBotId,
-                        replyToMsgId = updates.replyToMsgId,
-                        date = updates.date,
-                        message = updates.message,
-                        media = null,
-                        replyMarkup = null,
-                        entities = updates.entities
-                    ), updates.pts, updates.ptsCount
+            is UpdateShortMessageObject -> {
+                if (client.getAccessHash(ObjectType.USER, updates.userId) == null) {
+                    refetch = updates.userId
+                }
+                listOf(
+                    UpdateNewMessageObject(
+                        MessageObject(
+                            out = updates.out,
+                            mentioned = updates.mentioned,
+                            mediaUnread = updates.mediaUnread,
+                            silent = updates.silent,
+                            post = false,
+                            fromScheduled = false,
+                            legacy = false,
+                            editHide = false,
+                            id = updates.id,
+                            fromId = if (updates.out) client.getInputMe().userId else updates.userId,
+                            toId = PeerUserObject(if (updates.out) updates.userId else client.getInputMe().userId),
+                            fwdFrom = updates.fwdFrom,
+                            viaBotId = updates.viaBotId,
+                            replyToMsgId = updates.replyToMsgId,
+                            date = updates.date,
+                            message = updates.message,
+                            media = null,
+                            replyMarkup = null,
+                            entities = updates.entities
+                        ), updates.pts, updates.ptsCount
+                    )
                 )
-            )
-            is UpdateShortChatMessageObject -> listOf(
-                UpdateNewMessageObject(
-                    MessageObject(
-                        out = updates.out,
-                        mentioned = updates.mentioned,
-                        mediaUnread = updates.mediaUnread,
-                        silent = updates.silent,
-                        post = false,
-                        fromScheduled = false,
-                        legacy = false,
-                        editHide = false,
-                        id = updates.id,
-                        fromId = updates.fromId,
-                        toId = PeerChatObject(updates.chatId),
-                        fwdFrom = updates.fwdFrom,
-                        viaBotId = updates.viaBotId,
-                        replyToMsgId = updates.replyToMsgId,
-                        date = updates.date,
-                        message = updates.message,
-                        media = null,
-                        replyMarkup = null,
-                        entities = updates.entities
-                    ), updates.pts, updates.ptsCount
+            }
+            is UpdateShortChatMessageObject -> {
+                if (client.getAccessHash(ObjectType.USER, updates.fromId) == null) {
+                    refetch = updates.fromId
+                }
+                listOf(
+                    UpdateNewMessageObject(
+                        MessageObject(
+                            out = updates.out,
+                            mentioned = updates.mentioned,
+                            mediaUnread = updates.mediaUnread,
+                            silent = updates.silent,
+                            post = false,
+                            fromScheduled = false,
+                            legacy = false,
+                            editHide = false,
+                            id = updates.id,
+                            fromId = updates.fromId,
+                            toId = PeerChatObject(updates.chatId),
+                            fwdFrom = updates.fwdFrom,
+                            viaBotId = updates.viaBotId,
+                            replyToMsgId = updates.replyToMsgId,
+                            date = updates.date,
+                            message = updates.message,
+                            media = null,
+                            replyMarkup = null,
+                            entities = updates.entities
+                        ), updates.pts, updates.ptsCount
+                    )
                 )
-            )
+            }
             is UpdateShortObject -> listOf(updates.update)
             is UpdatesCombinedObject -> updates.updates
             is UpdatesObject -> updates.updates
             is UpdateShortSentMessageObject -> return // handled by rpc caller
         }
-        updates.date?.let { checkDate(it) }
+        act {
+            updates.date?.let { checkDateLocked(it) }
+        }
         val (hasPts, hasNoPts) = innerUpdates.partition { it.pts != null }
         for (update in hasPts) {
             val pts = update.pts!!
@@ -298,20 +318,25 @@ open class UpdateHandlerImpl(
                 fetchChannelUpdates(update.channelId)
                 return
             }
-            val (applicablePts, job) = act {
+            val (localPts, applicablePts, job) = act {
                 val localPts = updateState.pts[update.channelId]
                 val applicablePts = pts - ptsCount!!
 
                 val job = when {
                     (ptsCount == 0 && pts >= localPts?.minus(1) ?: 0)
-                            || applicablePts == 0 -> {
+                            || applicablePts == 0 || skipChecks -> {
                         // update doesn't need to change the pts
-                        dispatchUpdate(update)
+                        if (update is UpdateNewMessageObject) {
+                            Napier.d("$refetch, $applicablePts, $update, true")
+                        }
+                        handleSinglePtsLocked(refetch, applicablePts, update, true, skipDispatch)
                         null
                     }
                     applicablePts == localPts || localPts == null -> {
-                        dispatchUpdate(update)
-                        updateState.pts[update.channelId] = pts
+                        if (update is UpdateNewMessageObject) {
+                            Napier.d("$refetch, $applicablePts, $update, false")
+                        }
+                        handleSinglePtsLocked(refetch, applicablePts, update, false, skipDispatch)
                         null
                     }
                     applicablePts < localPts -> {
@@ -325,9 +350,10 @@ open class UpdateHandlerImpl(
                         job
                     }
                 }
-                Pair(applicablePts, job)
+                Triple(localPts, applicablePts, job)
             }
             job?.let {
+                Napier.d("Waiting for update with pts=$applicablePts, channelId=${update.channelId}")
                 val join = withTimeoutOrNull(500) {
                     it.join()
                 }
@@ -340,10 +366,9 @@ open class UpdateHandlerImpl(
                     }
                     return // server will resend this update too
                 }
-                dispatchUpdate(update)
+
                 act {
-                    updateState.pts[update.channelId] = pts
-                    pendingUpdatesPts[update.channelId to pts]?.complete()
+                    handleSinglePtsLocked(refetch, applicablePts, update, false, skipDispatch)
                 }
             }
         }
@@ -352,19 +377,13 @@ open class UpdateHandlerImpl(
             val applicableSeq = updates.seqStart?.minus(1)
             val localSeq = updateState.seq
             val job = when {
-                applicableSeq == null || applicableSeq == -1 -> {
+                applicableSeq == null || applicableSeq == -1 || skipChecks -> {
                     // update order doesn't matter
-                    for (update in hasNoPts) {
-                        dispatchUpdate(update)
-                    }
+                    handleSingleSeqLocked(hasNoPts, updates, true, skipDispatch)
                     null
                 }
                 applicableSeq == localSeq -> {
-                    for (update in hasNoPts) {
-                        dispatchUpdate(update)
-                    }
-                    updateState.seq = updates.seq!!
-                    updates.date?.let { checkDate(it) }
+                    handleSingleSeqLocked(hasNoPts, updates, false, skipDispatch)
                     null
                 }
                 applicableSeq < localSeq -> {
@@ -372,7 +391,6 @@ open class UpdateHandlerImpl(
                     null
                 }
                 else -> {
-                    //require(!preventGapFilling) { "Gap found in gap refill($applicableSeq, $localSeq)" }
                     val job = Job()
                     pendingUpdatesSeq[applicableSeq] = job
                     job
@@ -392,33 +410,83 @@ open class UpdateHandlerImpl(
                 fetchUpdates()
                 return // server will resend this update too
             }
-            for (update in hasNoPts) {
-                dispatchUpdate(update)
-            }
             act {
-                updateState.seq = applicableSeq!! + 1
-                pendingUpdatesSeq[applicableSeq + 1]?.complete()
+                handleSingleSeqLocked(hasNoPts, updates, false, skipDispatch)
             }
         }
     }
 
+    protected suspend fun handleSinglePtsLocked(
+        refetch: Int?,
+        applicablePts: Int?,
+        update: UpdateType,
+        skipPts: Boolean,
+        skipDispatch: Boolean
+    ) {
+        refetch?.let {
+            if (client.getAccessHash(ObjectType.USER, it) == null) {
+                fetchHashes(applicablePts!!, update.ptsCount ?: 1)
+            }
+        }
+        if (!skipDispatch)
+            dispatchUpdate(update)
+        if (!skipPts) {
+            Napier.d("settings pts to ${update.pts}")
+            updateState.pts[update.channelId] = update.pts!!
+            pendingUpdatesPts[update.channelId to update.pts!!]?.complete()
+        }
+    }
+
+    protected fun handleSingleSeqLocked(
+        hasNoPts: List<UpdateType>,
+        updates: UpdatesType,
+        skipSeq: Boolean,
+        skipDispatch: Boolean
+    ) {
+        if (!skipDispatch) {
+            for (update in hasNoPts) {
+                dispatchUpdate(update)
+            }
+        }
+        if (!skipSeq) {
+            updateState.seq = updates.seq!!
+            updates.date?.let { checkDateLocked(it) }
+            pendingUpdatesSeq[updates.seq!!]?.complete()
+        }
+    }
+
+    protected suspend fun fetchHashes(fromPts: Int, limit: Int) {
+        client(
+            Updates_GetDifferenceRequest(
+                fromPts,
+                limit,
+                updateState.date,
+                updateState.qts
+            )
+        )
+        // no matter the result, we can't do anything about it
+    }
+
     override suspend fun catchUp() = fetchUpdates()
 
-    protected suspend fun checkDate(date: Int) = act {
+    protected fun checkDateLocked(date: Int) {
         if (date > updateState.date)
             updateState.date = date
     }
 
     protected fun dispatchUpdate(update: UpdateType) {
-        require(updates.offer(Update(update))) { "Failed to offer update" }
+        Napier.d("dispatching update $update")
+        check(updates.offer(Update(update))) { "Failed to offer update" }
     }
 
     protected suspend fun fetchUpdates() {
         val updates = mutableListOf<UpdateType>()
         var tmpState: Updates_StateObject? = null
         loop@ while (true) {
+            var seqStart = -1 // compiler doesn't know act{} always calls once
             val difference = client(
                 act {
+                    seqStart = (tmpState?.seq ?: updateState.seq) + 1
                     Updates_GetDifferenceRequest(
                         tmpState?.pts ?: updateState.pts[null]!!,
                         maxDifference,
@@ -427,12 +495,14 @@ open class UpdateHandlerImpl(
                     )
                 }
             )
+            Napier.d("difference=$difference")
             when (difference) {
                 is Updates_DifferenceObject -> {
                     val state = difference.state as Updates_StateObject
                     handleUpdates(
-                        UpdatesObject(
-                            updates + difference.otherUpdates + generateUpdates(
+                        UpdatesCombinedObject(
+                            updates + generateUpdates(
+                                difference.otherUpdates,
                                 difference.newMessages,
                                 difference.newEncryptedMessages,
                                 ::UpdateNewMessageObject
@@ -440,14 +510,16 @@ open class UpdateHandlerImpl(
                             difference.users,
                             difference.chats,
                             state.date,
+                            seqStart,
                             state.seq
-                        )
+                        ), true
                     )
                     break@loop
                 }
                 is Updates_DifferenceSliceObject -> {
                     tmpState = difference.intermediateState as Updates_StateObject
-                    updates += difference.otherUpdates + generateUpdates(
+                    updates += generateUpdates(
+                        difference.otherUpdates,
                         difference.newMessages,
                         difference.newEncryptedMessages,
                         ::UpdateNewMessageObject
@@ -486,24 +558,28 @@ open class UpdateHandlerImpl(
                 maxChannelDifference
             )
         )
+        Napier.d("difference = $result")
         when (result) {
             is Updates_ChannelDifferenceEmptyObject -> {
             }
             is Updates_ChannelDifferenceObject -> {
                 handleUpdates(
                     UpdatesObject(
-                        result.otherUpdates + generateUpdates(
+                        generateUpdates(
+                            result.otherUpdates,
                             result.newMessages,
                             listOf(),
                             ::UpdateNewChannelMessageObject
                         ),
                         result.users,
                         result.chats,
-                        result.pts,
+                        0,
                         0
-                    )
+                    ), true
                 )
-                act { updateState.pts[channelId] = result.pts } // updates sent in the difference may not have a pts
+                act {
+                    updateState.pts[channelId] = result.pts
+                } // updates sent in the difference may not have a pts
                 if (!result.final) {
                     fetchChannelUpdates(channelId)
                 }
@@ -516,6 +592,7 @@ open class UpdateHandlerImpl(
     }
 
     protected fun generateUpdates(
+        otherUpdates: List<UpdateType>,
         newMessages: List<MessageType>,
         newEncryptedMessages: List<EncryptedMessageType>,
         constructor: (MessageType, Int, Int, Boolean) -> UpdateType
@@ -527,7 +604,7 @@ open class UpdateHandlerImpl(
                 0,
                 false
             )
-        } + newEncryptedMessages.map { UpdateNewEncryptedMessageObject(it, 0) }
+        } + newEncryptedMessages.map { UpdateNewEncryptedMessageObject(it, 0) } + otherUpdates
 
 
     private val UpdatesType.date

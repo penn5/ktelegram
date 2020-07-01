@@ -21,13 +21,16 @@ package tk.hack5.telekat.core.network
 import io.ktor.network.selector.ActorSelectorManager
 import io.ktor.network.sockets.*
 import io.ktor.util.KtorExperimentalAPI
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.io.ByteReadChannel
 import kotlinx.coroutines.io.ByteWriteChannel
 import java.net.InetSocketAddress
 
-actual class TCPClientImpl actual constructor(private val targetAddress: String, private val targetPort: Int)
-        : TCPClient(targetAddress, targetPort) {
+actual class TCPClientImpl actual constructor(
+    scope: CoroutineScope,
+    private val targetAddress: String,
+    private val targetPort: Int
+) : TCPClient(targetAddress, targetPort) {
     private lateinit var socket: Socket
 
     override var readChannel: ByteReadChannel? = null
@@ -51,8 +54,6 @@ actual class TCPClientImpl actual constructor(private val targetAddress: String,
         socket.awaitClosed()
     }
 
-    companion object {
-        @KtorExperimentalAPI
-        val actor = ActorSelectorManager(Dispatchers.IO)
-    }
+    @KtorExperimentalAPI
+    val actor = ActorSelectorManager(scope.coroutineContext)
 }

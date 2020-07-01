@@ -435,9 +435,10 @@ class ErrorsWriter(output: (String) -> Unit, packageName: String, private val er
 
     private fun writeRootClass() {
         write(
-            "open class RpcError(val code: Int, val id: String, message: String?, val request: TLMethod<*>) : Error(\"\$message (caused by \$request)\") {",
+            "open class RpcError(val code: Int, val id: String, message: String?, val request: TLMethod<*>) : Exception(\"\$code: \$message (caused by \$request)\") {",
             1
         )
+        write("constructor(cause: Throwable?) : this((cause as RpcError).code, (cause as RpcError).id, (cause as RpcError).message, (cause as RpcError).request)")
         write("companion object {", 1)
         write("operator fun invoke(code: Int, id: String, request: TLMethod<*>) = when (code) {", 1)
         write("in 300..399 -> RedirectedError(code, id, request)")

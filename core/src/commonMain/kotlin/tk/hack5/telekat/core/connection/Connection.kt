@@ -19,6 +19,7 @@
 package tk.hack5.telekat.core.connection
 
 import com.github.aakira.napier.Napier
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ClosedReceiveChannelException
@@ -37,7 +38,7 @@ private const val tag = "Connection"
 class ConnectionClosedError(message: String? = null, cause: Exception? = null) : Exception(message, cause)
 class AlreadyConnectedError(message: String? = null, cause: Exception? = null) : Exception(message, cause)
 
-abstract class Connection(protected val host: String, protected val port: Int) {
+abstract class Connection(protected val scope: CoroutineScope, protected val host: String, protected val port: Int) {
     var connected: Boolean? = false // null when in progress
         private set
     private val connectedChannel = Channel<Boolean?>()
@@ -90,13 +91,18 @@ abstract class Connection(protected val host: String, protected val port: Int) {
     protected abstract suspend fun disconnectInternal()
 }
 
-abstract class TcpConnection(host: String, port: Int, private val network: (String, Int) -> TCPClient) : Connection(host, port) {
+abstract class TcpConnection(
+    scope: CoroutineScope,
+    host: String,
+    port: Int,
+    private val network: (CoroutineScope, String, Int) -> TCPClient
+) : Connection(scope, host, port) {
     private var socket: TCPClient? = null
     protected val readChannel get() = socket?.readChannel!!
     protected val writeChannel get() = socket?.writeChannel!!
 
     override suspend fun connectInternal() {
-        network(host, port).let {
+        network(scope, host, port).let {
             it.connect()
             socket = it
         }
@@ -107,8 +113,14 @@ abstract class TcpConnection(host: String, port: Int, private val network: (Stri
     }
 }
 
-class TcpFullConnection(host: String, port: Int, network: (String, Int) -> TCPClient = ::TCPClientImpl) : TcpConnection(host, port, network) {
-    constructor(host: String, port: Int) : this(host, port, ::TCPClientImpl)
+class TcpFullConnection(
+    scope: CoroutineScope,
+    host: String,
+    port: Int,
+    network: (CoroutineScope, String, Int) -> TCPClient = ::TCPClientImpl
+) : TcpConnection(scope, host, port, network) {
+    constructor(scope: CoroutineScope, host: String, port: Int) : this(scope, host, port, ::TCPClientImpl)
+
     private var counter = 0
     override suspend fun sendInternal(data: ByteArray) {
         val len = data.size + 12

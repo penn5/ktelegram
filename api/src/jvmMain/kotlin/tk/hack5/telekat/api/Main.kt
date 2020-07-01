@@ -25,18 +25,20 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import tk.hack5.telekat.core.state.JsonSession
 import tk.hack5.telekat.core.state.invoke
+import tk.hack5.telekat.core.tl.Messages_EditMessageRequest
 import java.io.File
 
 @ExperimentalCoroutinesApi
 fun main(): Unit = runBlocking {
-    //DebugProbes.install()
-    Napier.base(DebugAntilog())
+    /*DebugProbes.install()
+    */Napier.base(DebugAntilog())
     val client =
         TelegramClientApiImpl(
             "596386",
             "e142e0a65a50b707fa539ac91db2de16",
             session = JsonSession(File("telekat.json")),
-            maxFloodWait = 15
+            maxFloodWait = 15,
+            scope = this
         )
     /*client.updateCallbacks += { or ->
         or.update?.let {
@@ -59,9 +61,10 @@ fun main(): Unit = runBlocking {
         println(it)
         when (it) {
             is NewMessage.NewMessageEvent -> {
-                it.getChat().let { chat ->
-                    if (chat is PeerUser && !chat.user.bot && chat.user.firstName == "hackintosh5") {
-                        client.sendMessage(it.getInputChat(), "sorry for any spam, i'm testing my userbot.")
+                if (it.out) {
+                    if (it.message == ".ping") {
+                        val update = client(Messages_EditMessageRequest(false, it.getInputChat(), it.id, "Pong"))
+                        client.sendUpdate(update)
                     }
                 }
             }
@@ -69,13 +72,12 @@ fun main(): Unit = runBlocking {
             is RawUpdate.RawUpdateEvent -> println(it)
         }
     }
-    //println(client.eventCallbacks)
-    //println(client.updateCallbacks)
     println(client.start(
         phoneNumber = {
             print("Phone Number: ")
             readLine()!!
-        }, signUpConsent = { Pair("test", "account") },
+        },
+        signUpConsent = { Pair("test", "account") },
         phoneCode = {
             print("Enter the code you received: ")
             readLine()!!
@@ -84,14 +86,13 @@ fun main(): Unit = runBlocking {
             System.console().readPassword().joinToString("")
         }
     ))
-    println("catching up")
     client.catchUp()
-    println("catch up complete")
     delay(30000)
     //DebugProbes.dumpCoroutines()
     //val dialogs = client.getDialogs()
     //println(dialogs.first())
     //client.sendMessage((dialogs.filter { (it as? DialogChat)?.peer?.fullName?.contains("Programmers") == true }.first() as DialogChat).peer, "hello from my new kotlin mtproto library")
+    //println(client(Channels_GetChannelsRequest(listOf(InputChannelObject(channelId=1173753783, accessHash=-3214895137574953081)))))
     client.disconnect()
     Unit
 }

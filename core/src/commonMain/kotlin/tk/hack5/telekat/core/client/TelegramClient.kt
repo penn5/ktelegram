@@ -72,11 +72,12 @@ abstract class TelegramClient {
     abstract suspend fun getAccessHash(constructor: ObjectType, peerId: Long): Long?
     abstract var updateCallbacks: List<suspend (UpdateOrSkipped) -> Unit>
     abstract suspend fun catchUp()
+    abstract suspend fun sendUpdate(update: UpdatesType)
 }
 
 open class TelegramClientCoreImpl(
     protected val apiId: String, protected val apiHash: String,
-    protected val connectionConstructor: (String, Int) -> Connection = ::TcpFullConnection,
+    protected val connectionConstructor: (CoroutineScope, String, Int) -> Connection = ::TcpFullConnection,
     protected val plaintextEncoder: MTProtoEncoder = PlaintextMTProtoEncoder(MTProtoStateImpl()),
     protected val encryptedEncoderConstructor: (MTProtoState) -> EncryptedMTProtoEncoder = { EncryptedMTProtoEncoder(it) },
     protected val deviceModel: String = "ktg",
@@ -86,7 +87,8 @@ open class TelegramClientCoreImpl(
     protected val langPack: String = "",
     protected val langCode: String = "en",
     protected var session: Session<*> = MemorySession(),
-    protected val maxFloodWait: Int = 0
+    protected val maxFloodWait: Int = 0,
+    protected val parentScope: CoroutineScope = GlobalScope
 ) : TelegramClient() {
     override var secureRandom = SecureRandom()
     protected var connection: Connection? = null
@@ -96,15 +98,15 @@ open class TelegramClientCoreImpl(
     protected val updatesChannel = Channel<UpdatesType>(Channel.UNLIMITED)
     protected lateinit var inputUserSelf: InputPeerUserObject
     protected var updatesHandler: UpdateHandler? = null
-    protected val activeTasks = mutableListOf<Job>()
+    var scope = CoroutineScope(parentScope.coroutineContext + SupervisorJob(parentScope.coroutineContext[Job]!!))
 
     override var updateCallbacks = listOf<suspend (UpdateOrSkipped) -> Unit>()
 
     override suspend fun connect() {
         session.updates?.let {
-            updatesHandler = UpdateHandlerImpl(it, this)
+            updatesHandler = UpdateHandlerImpl(scope, it, this)
         }
-        connectionConstructor(session.ipAddress, session.port).let {
+        connectionConstructor(scope, session.ipAddress, session.port).let {
             it.connect()
             this@TelegramClientCoreImpl.connection = it
             if (session.state?.authKey == null)
@@ -123,7 +125,7 @@ open class TelegramClientCoreImpl(
                 unpacker = MessagePackerUnpacker(it, encoder!!, session.state!!, updatesChannel)
             }
 
-            activeTasks += GlobalScope.launch {
+            scope.launch {
                 startRecvLoop()
             }
 
@@ -148,16 +150,14 @@ open class TelegramClientCoreImpl(
     }
 
     override suspend fun disconnect() {
-        activeTasks.forEach {
-            it.cancel()
-        }
-        activeTasks.forEach {
-            it.join()
-        }
-        activeTasks.clear()
+        updatesHandler?.updates?.close()
         session.save()
         connection?.disconnect()
         connection = null
+        println(scope)
+        scope.coroutineContext[Job]!!.cancelAndJoin()
+        scope = CoroutineScope(parentScope.coroutineContext + SupervisorJob(parentScope.coroutineContext[Job]!!))
+        println(scope)
     }
 
     override suspend fun start(
@@ -172,18 +172,23 @@ open class TelegramClientCoreImpl(
             session =
                 session.setUpdateState(UpdateState(state.seq, state.date, state.qts, mutableMapOf(null to state.pts)))
         }
-        updatesHandler = UpdateHandlerImpl(session.updates!!, this)
-        activeTasks += GlobalScope.launch {
+        updatesHandler = UpdateHandlerImpl(scope, session.updates!!, this)
+        scope.launch {
             while (true) {
                 coroutineScope {
                     val update = updatesHandler!!.updates.receive()
                     println(this@TelegramClientCoreImpl.updateCallbacks)
-                    this@TelegramClientCoreImpl.updateCallbacks.forEach { launch { it(update) } }
+                    this@TelegramClientCoreImpl.updateCallbacks.forEach {
+                        launch { it(update) }
+                    }
+                    println("dispatched update.")
                 }
             }
         }
         return loggedIn to ret
     }
+
+    override suspend fun sendUpdate(update: UpdatesType) = updatesHandler!!.handleUpdates(update)
 
     protected suspend fun logIn(
         phoneNumber: () -> String,
@@ -274,11 +279,18 @@ open class TelegramClientCoreImpl(
         }
         launch {
             while (true)
-                unpacker!!.updatesChannel.receive().let {
-                    updatesHandler?.getEntities(it)?.let { entities ->
-                        session.addEntities(entities)
+                try {
+                    unpacker!!.updatesChannel.receive().let {
+                        updatesHandler?.getEntities(it)?.let { entities ->
+                            session.addEntities(entities)
+                        }
+                        updatesHandler?.handleUpdates(it)
                     }
-                    updatesHandler?.handleUpdates(it)
+                } catch (e: Exception) {
+                    if (e is CancellationException)
+                        throw e
+                    Napier.e("Error in update receiver", e, tag = tag)
+                    // TODO possibly send a notification about missing updates
                 }
         }
     }
@@ -303,8 +315,9 @@ open class TelegramClientCoreImpl(
         val ret: R = try {
             sendWrapped(request, encoder!!)
         } catch (e: BadRequestError.FloodWaitError) {
-            if (e.seconds > maxFloodWait) throw e
-            delay(e.seconds.toLong())
+            val seconds = if (e.seconds == 0) 1 else e.seconds
+            if (seconds > maxFloodWait) throw e
+            delay(seconds.toLong())
             sendAndUnpack(request)
         }
         updatesHandler?.getEntities(ret)?.let {
